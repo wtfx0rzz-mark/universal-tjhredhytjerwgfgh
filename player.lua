@@ -1,16 +1,38 @@
 -- player.lua
 --=====================================================
--- 1337 Nights | Player Tab (ported to Universal Hub)
+-- Universal Hub | Player Tab (movement + player tracker)
 --=====================================================
 return function(C, R, UI)
+    C  = C  or _G.C
+    R  = R  or _G.R
+    UI = UI or _G.UI
+
     local Players      = C.Services.Players
     local RunService   = C.Services.RunService or game:GetService("RunService")
     local UIS          = C.Services.UIS        or game:GetService("UserInputService")
 
-    local lp = Players.LocalPlayer
+    local lp  = C.LocalPlayer or Players.LocalPlayer
     local tab = UI.Tabs and UI.Tabs.Player
     assert(tab, "Player tab not found in UI")
 
+    ---------------------------------------------------------------------
+    -- Shared state defaults (including toggles)
+    ---------------------------------------------------------------------
+    C.State         = C.State         or {}
+    C.State.Toggles = C.State.Toggles or {}
+    if C.State.Toggles.PlayerTracker == nil then
+        C.State.Toggles.PlayerTracker = true
+    end
+
+    -- fixed radius used only for distance-based fade; no UI slider
+    C.State.AuraRadius = C.State.AuraRadius or 150
+    local function auraRadius()
+        return math.clamp(tonumber(C.State.AuraRadius) or 150, 0, 1_000_000)
+    end
+
+    ---------------------------------------------------------------------
+    -- Helpers for movement / humanoid / connections
+    ---------------------------------------------------------------------
     local flyEnabled       = false
     local mobileFlyEnabled = false
     local FLYING           = false
@@ -33,16 +55,23 @@ return function(C, R, UI)
         local ch = lp.Character or lp.CharacterAdded:Wait()
         return ch:FindFirstChild("HumanoidRootPart")
     end
+
     local function humanoid()
         local ch = lp.Character
         return ch and ch:FindFirstChildOfClass("Humanoid")
     end
-    local function clearInstance(x) if x then pcall(function() x:Destroy() end) end end
-    local function disconnectConn(c) if c then pcall(function() c:Disconnect() end) end end
 
-    --========================
+    local function clearInstance(x)
+        if x then pcall(function() x:Destroy() end) end
+    end
+
+    local function disconnectConn(c)
+        if c then pcall(function() c:Disconnect() end) end
+    end
+
+    ---------------------------------------------------------------------
     -- Desktop Fly
-    --========================
+    ---------------------------------------------------------------------
     local function startDesktopFly()
         if FLYING then return end
         local root = hrp()
@@ -68,7 +97,7 @@ return function(C, R, UI)
         keyDownConn = UIS.InputBegan:Connect(function(input, gpe)
             if gpe or input.UserInputType ~= Enum.UserInputType.Keyboard then return end
             local k = input.KeyCode
-            if k == Enum.KeyCode.W then CONTROL.F =  flySpeed
+            if     k == Enum.KeyCode.W then CONTROL.F =  flySpeed
             elseif k == Enum.KeyCode.S then CONTROL.B = -flySpeed
             elseif k == Enum.KeyCode.A then CONTROL.L = -flySpeed
             elseif k == Enum.KeyCode.D then CONTROL.R =  flySpeed
@@ -76,10 +105,11 @@ return function(C, R, UI)
             elseif k == Enum.KeyCode.Q then CONTROL.E = -flySpeed * 2
             end
         end)
+
         keyUpConn = UIS.InputEnded:Connect(function(input)
             if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
             local k = input.KeyCode
-            if k == Enum.KeyCode.W then CONTROL.F = 0
+            if     k == Enum.KeyCode.W then CONTROL.F = 0
             elseif k == Enum.KeyCode.S then CONTROL.B = 0
             elseif k == Enum.KeyCode.A then CONTROL.L = 0
             elseif k == Enum.KeyCode.D then CONTROL.R = 0
@@ -127,9 +157,9 @@ return function(C, R, UI)
         clearInstance(bodyGyro);     bodyGyro     = nil
     end
 
-    --========================
+    ---------------------------------------------------------------------
     -- Mobile Fly
-    --========================
+    ---------------------------------------------------------------------
     local function startMobileFly()
         if FLYING then return end
         local root = hrp()
@@ -149,9 +179,9 @@ return function(C, R, UI)
         bodyVelocity.Velocity = Vector3.new()
         bodyVelocity.Parent = root
 
-        local tiltAngle = math.rad(-5) -- same slight forward tilt
+        local tiltAngle = math.rad(-5)
 
-        mobileAddedConn = Players.LocalPlayer.CharacterAdded:Connect(function()
+        mobileAddedConn = lp.CharacterAdded:Connect(function()
             root = hrp()
             if not root then return end
             clearInstance(bodyGyro); clearInstance(bodyVelocity)
@@ -173,7 +203,6 @@ return function(C, R, UI)
             local humCheck = humanoid()
             if humCheck then humCheck.PlatformStand = true end
 
-            -- slight forward tilt
             bodyGyro.CFrame = cam.CFrame * CFrame.Angles(tiltAngle, 0, 0)
 
             local move = Vector3.new()
@@ -210,14 +239,28 @@ return function(C, R, UI)
             startDesktopFly()
         end
     end
-    local function stopFly()
-        if mobileFlyEnabled then stopMobileFly() else stopDesktopFly() end
+
+    privateStopFly = function()
+        if mobileFlyEnabled then
+            stopMobileFly()
+        else
+            stopDesktopFly()
+        end
     end
 
-    --========================
+    local function stopFly()
+        if mobileFlyEnabled then
+            stopMobileFly()
+        else
+            stopDesktopFly()
+        end
+    end
+
+    ---------------------------------------------------------------------
     -- Force Fly
-    --========================
+    ---------------------------------------------------------------------
     local PITCH_DEADZONE = 0.22
+
     local function startForceFly()
         if forceFlyConn then return end
         local root = hrp()
@@ -229,20 +272,24 @@ return function(C, R, UI)
         forceLastFaceDir = root.CFrame.LookVector
 
         forceFlyConn = RunService.RenderStepped:Connect(function(dt)
-            local r = hrp()
-            local h = humanoid()
+            local r   = hrp()
+            local h   = humanoid()
             local cam = workspace.CurrentCamera
             if not r or not h or not cam then return end
 
             h.PlatformStand = true
 
-            local move = h.MoveDirection
-            local planar = Vector3.new(move.X,0,move.Z)
-            local mag = planar.Magnitude
-            if mag > 1e-3 then planar = planar / mag else planar = Vector3.zero end
+            local move   = h.MoveDirection
+            local planar = Vector3.new(move.X, 0, move.Z)
+            local mag    = planar.Magnitude
+            if mag > 1e-3 then
+                planar = planar / mag
+            else
+                planar = Vector3.zero
+            end
 
             local lookY = cam.CFrame.LookVector.Y
-            local vert = 0
+            local vert  = 0
             if mag > 1e-3 then
                 local a = math.abs(lookY)
                 if a > PITCH_DEADZONE then
@@ -252,18 +299,23 @@ return function(C, R, UI)
             end
 
             local delta = Vector3.zero
-            if mag > 1e-3 then delta = delta + planar * (flySpeed * 50 * dt) end
-            if vert ~= 0 then delta = delta + Vector3.new(0, vert * dt, 0) end
+            if mag > 1e-3 then
+                delta = delta + planar * (flySpeed * 50 * dt)
+            end
+            if vert ~= 0 then
+                delta = delta + Vector3.new(0, vert * dt, 0)
+            end
 
             forceDesiredPos = (forceDesiredPos or r.Position) + delta
 
             r.AssemblyLinearVelocity  = Vector3.new()
             r.AssemblyAngularVelocity = Vector3.new()
 
-            if mag > 1e-3 then forceLastFaceDir = planar end
+            if mag > 1e-3 then
+                forceLastFaceDir = planar
+            end
 
-            -- Restored original upright orientation logic
-            local face = forceLastFaceDir or r.CFrame.LookVector
+            local face   = forceLastFaceDir or r.CFrame.LookVector
             local faceAt = forceDesiredPos + Vector3.new(face.X, 0, face.Z)
             r.CFrame = CFrame.new(
                 forceDesiredPos,
@@ -290,9 +342,9 @@ return function(C, R, UI)
         end
     end
 
-    --========================
+    ---------------------------------------------------------------------
     -- Walk Speed
-    --========================
+    ---------------------------------------------------------------------
     local function setWalkSpeed(val)
         local hum = humanoid()
         if hum then hum.WalkSpeed = val end
@@ -306,9 +358,9 @@ return function(C, R, UI)
         end
     end)
 
-    --========================
+    ---------------------------------------------------------------------
     -- Noclip
-    --========================
+    ---------------------------------------------------------------------
     local function startNoclip()
         disconnectConn(noclipConn)
         noclipConn = RunService.Stepped:Connect(function()
@@ -321,27 +373,137 @@ return function(C, R, UI)
             end
         end)
     end
+
     local function stopNoclip()
         disconnectConn(noclipConn); noclipConn = nil
     end
 
-    --========================
+    ---------------------------------------------------------------------
     -- Infinite Jump
-    --========================
+    ---------------------------------------------------------------------
     local function startInfJump()
         disconnectConn(jumpConn)
         jumpConn = UIS.JumpRequest:Connect(function()
             local hum = humanoid()
-            if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+            if hum then
+                hum:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
         end)
     end
+
     local function stopInfJump()
         disconnectConn(jumpConn); jumpConn = nil
     end
 
-    --========================
+    ---------------------------------------------------------------------
+    -- Player Highlighter (extracted from visuals.lua; always-on while enabled)
+    ---------------------------------------------------------------------
+    local PLAYER_HL_NAME = "__PlayerTrackerHL__"
+    local runningPlayers  = false
+
+    local function bestPart(model)
+        if not model or not model:IsA("Model") then return nil end
+        local hrpPart = model:FindFirstChild("HumanoidRootPart")
+        if hrpPart and hrpPart:IsA("BasePart") then return hrpPart end
+        if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
+            return model.PrimaryPart
+        end
+        return model:FindFirstChildWhichIsA("BasePart")
+    end
+
+    local function ensureHighlight(parent, name)
+        local hl = parent:FindFirstChild(name)
+        if hl and hl:IsA("Highlight") then return hl end
+        hl = Instance.new("Highlight")
+        hl.Name = name
+        hl.Adornee = parent
+        hl.FillTransparency = 1
+        hl.OutlineTransparency = 0
+        hl.OutlineColor = Color3.fromRGB(255, 255, 0)
+        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        hl.Parent = parent
+        return hl
+    end
+
+    local function clearHighlight(parent, name)
+        local hl = parent and parent:FindFirstChild(name)
+        if hl and hl:IsA("Highlight") then
+            hl:Destroy()
+        end
+    end
+
+    local function trackPlayer(plr)
+        if plr == lp then return end
+        local function attach(ch)
+            if not ch then return end
+            local h = ensureHighlight(ch, PLAYER_HL_NAME)
+            h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            h.Enabled = true
+        end
+        if plr.Character then
+            attach(plr.Character)
+        end
+        plr.CharacterAdded:Connect(attach)
+    end
+
+    local function startPlayerTracker()
+        if runningPlayers then return end
+        runningPlayers = true
+
+        for _, p in ipairs(Players:GetPlayers()) do
+            trackPlayer(p)
+        end
+        Players.PlayerAdded:Connect(trackPlayer)
+
+        task.spawn(function()
+            while runningPlayers do
+                local lch  = lp.Character
+                local lhrp = lch and lch:FindFirstChild("HumanoidRootPart")
+                local R    = auraRadius()
+
+                for _, plr in ipairs(Players:GetPlayers()) do
+                    if plr ~= lp then
+                        local ch = plr.Character
+                        if ch then
+                            local h = ensureHighlight(ch, PLAYER_HL_NAME)
+                            h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                            h.Enabled = true
+
+                            if lhrp then
+                                local phrp = ch:FindFirstChild("HumanoidRootPart")
+                                local p0   = phrp and phrp.Position or (bestPart(ch) and bestPart(ch).Position)
+                                if p0 then
+                                    local d = (p0 - lhrp.Position).Magnitude
+                                    local t = math.clamp(d / math.max(R, 1), 0, 1)
+                                    -- near: solid outline, far: dimmer; but they're ALWAYS highlighted
+                                    h.FillTransparency    = 1 - (0.85 * t)
+                                    h.OutlineTransparency = 0.2 * (1 - t)
+                                end
+                            end
+                        end
+                    end
+                end
+
+                task.wait(0.25)
+            end
+
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= lp and plr.Character then
+                    clearHighlight(plr.Character, PLAYER_HL_NAME)
+                end
+            end
+        end)
+    end
+
+    local function stopPlayerTracker()
+        runningPlayers = false
+    end
+
+    ---------------------------------------------------------------------
     -- UI Controls
-    --========================
+    ---------------------------------------------------------------------
+
+    -- Movement section
     tab:Section({ Title = "Player • Movement", Icon = "activity" })
 
     tab:Slider({
@@ -384,7 +546,11 @@ return function(C, R, UI)
         Value = true,
         Callback = function(state)
             speedEnabled = state
-            if state then setWalkSpeed(walkSpeedValue) else setWalkSpeed(16) end
+            if state then
+                setWalkSpeed(walkSpeedValue)
+            else
+                setWalkSpeed(16)
+            end
         end
     })
 
@@ -422,6 +588,26 @@ return function(C, R, UI)
         end
     })
 
+    tab:Divider()
+    tab:Section({ Title = "Visuals", Icon = "target" })
+
+    -- Player Tracker toggle only (no slider)
+    tab:Toggle({
+        Title = "Player Tracker",
+        Value = C.State.Toggles.PlayerTracker or false,
+        Callback = function(on)
+            C.State.Toggles.PlayerTracker = on
+            if on then
+                startPlayerTracker()
+            else
+                stopPlayerTracker()
+            end
+        end
+    })
+
+    ---------------------------------------------------------------------
+    -- Respawn handling
+    ---------------------------------------------------------------------
     lp.CharacterAdded:Connect(function()
         if flyEnabled then
             task.defer(function()
@@ -441,4 +627,9 @@ return function(C, R, UI)
             end)
         end
     end)
+
+    -- Auto-start player tracker if enabled in state
+    if C.State.Toggles.PlayerTracker then
+        startPlayerTracker()
+    end
 end
