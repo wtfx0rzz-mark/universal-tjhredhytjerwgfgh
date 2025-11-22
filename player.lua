@@ -1,635 +1,513 @@
 -- player.lua
---=====================================================
--- Universal Hub | Player Tab (movement + player tracker)
---=====================================================
+-- Universal hub • Player tab: movement + godmode
+
 return function(C, R, UI)
     C  = C  or _G.C
     R  = R  or _G.R
     UI = UI or _G.UI
 
-    local Players      = C.Services.Players
-    local RunService   = C.Services.RunService or game:GetService("RunService")
-    local UIS          = C.Services.UIS        or game:GetService("UserInputService")
+    local Services = C.Services or {}
+    local Players  = Services.Players  or game:GetService("Players")
+    local Run      = Services.Run      or game:GetService("RunService")
+    local UIS      = Services.UIS      or game:GetService("UserInputService")
+    local RS       = Services.RS       or game:GetService("ReplicatedStorage")
+    local WS       = Services.WS       or game:GetService("Workspace")
 
-    local lp  = C.LocalPlayer or Players.LocalPlayer
-    local tab = UI.Tabs and UI.Tabs.Player
-    assert(tab, "Player tab not found in UI")
+    local lp = C.LocalPlayer or Players.LocalPlayer
+    if not (lp and UI and UI.Tabs and UI.Tabs.Player) then return end
 
-    ---------------------------------------------------------------------
-    -- Shared state defaults (including toggles)
-    ---------------------------------------------------------------------
-    C.State         = C.State         or {}
-    C.State.Toggles = C.State.Toggles or {}
-    if C.State.Toggles.PlayerTracker == nil then
-        C.State.Toggles.PlayerTracker = true
+    local tab = UI.Tabs.Player
+
+    C.Config         = C.Config or {}
+    C.State          = C.State  or {}
+    C.State.Toggles  = C.State.Toggles or {}
+
+    ------------------------------------------------------------------------
+    -- Helpers
+    ------------------------------------------------------------------------
+
+    local function getCharacter()
+        return lp.Character or lp.CharacterAdded:Wait()
     end
 
-    -- fixed radius used only for distance-based fade; no UI slider
-    C.State.AuraRadius = C.State.AuraRadius or 150
-    local function auraRadius()
-        return math.clamp(tonumber(C.State.AuraRadius) or 150, 0, 1_000_000)
+    local function getHumanoid()
+        local ch = getCharacter()
+        return ch:FindFirstChildOfClass("Humanoid")
     end
 
-    ---------------------------------------------------------------------
-    -- Helpers for movement / humanoid / connections
-    ---------------------------------------------------------------------
-    local flyEnabled       = false
-    local mobileFlyEnabled = false
-    local FLYING           = false
-    local flySpeed         = 3
-    local walkSpeedValue   = 80
-    local speedEnabled     = true
-
-    local forceFlyEnabled  = false
-    local forceFlyConn     = nil
-    local forceDesiredPos  = nil
-    local forceLastFaceDir = nil
-
-    local keyDownConn, keyUpConn, jumpConn, noclipConn, renderConn
-    local mobileAddedConn, mobileRenderConn
-    local bodyGyro, bodyVelocity
-
-    local EnableFlyToggleCtrl, ForceFlyToggleCtrl
-
-    local function hrp()
-        local ch = lp.Character or lp.CharacterAdded:Wait()
+    local function getRoot()
+        local ch = getCharacter()
         return ch:FindFirstChild("HumanoidRootPart")
     end
 
-    local function humanoid()
-        local ch = lp.Character
-        return ch and ch:FindFirstChildOfClass("Humanoid")
+    ------------------------------------------------------------------------
+    -- Movement: WalkSpeed / JumpPower
+    ------------------------------------------------------------------------
+
+    local DEFAULT_SPEED     = 16
+    local DEFAULT_JUMPPOWER = 50
+
+    local function applyMovementConfig()
+        local hum = getHumanoid()
+        if not hum then return end
+
+        local ws  = tonumber(C.Config.WalkSpeed)  or DEFAULT_SPEED
+        local jp  = tonumber(C.Config.JumpPower) or DEFAULT_JUMPPOWER
+
+        hum.UseJumpPower = true
+        hum.WalkSpeed    = ws
+        hum.JumpPower    = jp
     end
 
-    local function clearInstance(x)
-        if x then pcall(function() x:Destroy() end) end
-    end
+    tab:Section({ Title = "Movement" })
 
-    local function disconnectConn(c)
-        if c then pcall(function() c:Disconnect() end) end
-    end
+    tab:Slider({
+        Title = "Walk Speed",
+        Value = {
+            Min     = 8,
+            Max     = 120,
+            Default = tonumber(C.Config.WalkSpeed) or DEFAULT_SPEED
+        },
+        Callback = function(v)
+            local n = tonumber(type(v) == "table" and (v.Value or v.Current or v.Default) or v)
+            if not n then return end
+            n = math.clamp(n, 8, 120)
+            C.Config.WalkSpeed = n
+            local hum = getHumanoid()
+            if hum then hum.WalkSpeed = n end
+        end
+    })
 
-    ---------------------------------------------------------------------
-    -- Desktop Fly
-    ---------------------------------------------------------------------
-    local function startDesktopFly()
-        if FLYING then return end
-        local root = hrp()
-        local hum  = humanoid()
-        if not root or not hum then return end
-
-        FLYING = true
-
-        bodyGyro     = Instance.new("BodyGyro")
-        bodyVelocity = Instance.new("BodyVelocity")
-        bodyGyro.P = 9e4
-        bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-        bodyGyro.CFrame = root.CFrame
-        bodyGyro.Parent = root
-
-        bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-        bodyVelocity.Velocity = Vector3.new()
-        bodyVelocity.Parent = root
-
-        local CONTROL = {F=0,B=0,L=0,R=0,Q=0,E=0}
-        local tiltAngle = math.rad(-5) -- slight forward tilt
-
-        keyDownConn = UIS.InputBegan:Connect(function(input, gpe)
-            if gpe or input.UserInputType ~= Enum.UserInputType.Keyboard then return end
-            local k = input.KeyCode
-            if     k == Enum.KeyCode.W then CONTROL.F =  flySpeed
-            elseif k == Enum.KeyCode.S then CONTROL.B = -flySpeed
-            elseif k == Enum.KeyCode.A then CONTROL.L = -flySpeed
-            elseif k == Enum.KeyCode.D then CONTROL.R =  flySpeed
-            elseif k == Enum.KeyCode.E then CONTROL.Q =  flySpeed * 2
-            elseif k == Enum.KeyCode.Q then CONTROL.E = -flySpeed * 2
+    tab:Slider({
+        Title = "Jump Power",
+        Value = {
+            Min     = 25,
+            Max     = 200,
+            Default = tonumber(C.Config.JumpPower) or DEFAULT_JUMPPOWER
+        },
+        Callback = function(v)
+            local n = tonumber(type(v) == "table" and (v.Value or v.Current or v.Default) or v)
+            if not n then return end
+            n = math.clamp(n, 25, 200)
+            C.Config.JumpPower = n
+            local hum = getHumanoid()
+            if hum then
+                hum.UseJumpPower = true
+                hum.JumpPower    = n
             end
-        end)
+        end
+    })
 
-        keyUpConn = UIS.InputEnded:Connect(function(input)
-            if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
-            local k = input.KeyCode
-            if     k == Enum.KeyCode.W then CONTROL.F = 0
-            elseif k == Enum.KeyCode.S then CONTROL.B = 0
-            elseif k == Enum.KeyCode.A then CONTROL.L = 0
-            elseif k == Enum.KeyCode.D then CONTROL.R = 0
-            elseif k == Enum.KeyCode.E then CONTROL.Q = 0
-            elseif k == Enum.KeyCode.Q then CONTROL.E = 0
-            end
-        end)
+    ------------------------------------------------------------------------
+    -- Infinite Jump
+    ------------------------------------------------------------------------
 
-        renderConn = RunService.RenderStepped:Connect(function()
-            local cam = workspace.CurrentCamera
-            if not cam or not root then return end
-            local humCheck = humanoid()
-            if humCheck then humCheck.PlatformStand = true end
+    local infJumpOn  = C.State.Toggles.InfiniteJump or false
+    local infJumpCon = nil
 
-            -- slight forward tilt based on camera
-            bodyGyro.CFrame = cam.CFrame * CFrame.Angles(tiltAngle, 0, 0)
+    local function enableInfiniteJump()
+        if infJumpOn then return end
+        infJumpOn = true
+        C.State.Toggles.InfiniteJump = true
 
-            local moveVec = Vector3.new()
-            if CONTROL.F ~= 0 or CONTROL.B ~= 0 then
-                moveVec = moveVec + cam.CFrame.LookVector * (CONTROL.F + CONTROL.B)
-            end
-            if CONTROL.L ~= 0 or CONTROL.R ~= 0 then
-                moveVec = moveVec + cam.CFrame.RightVector * (CONTROL.R + CONTROL.L)
-            end
-            if CONTROL.Q ~= 0 or CONTROL.E ~= 0 then
-                moveVec = moveVec + cam.CFrame.UpVector * (CONTROL.Q + CONTROL.E)
-            end
+        if infJumpCon then
+            infJumpCon:Disconnect()
+            infJumpCon = nil
+        end
 
-            if moveVec.Magnitude > 0 then
-                bodyVelocity.Velocity = moveVec.Unit * (flySpeed * 50)
-            else
-                bodyVelocity.Velocity = Vector3.new()
+        infJumpCon = UIS.JumpRequest:Connect(function()
+            if not infJumpOn then return end
+            local hum = getHumanoid()
+            if hum then
+                pcall(function()
+                    hum:ChangeState(Enum.HumanoidStateType.Jumping)
+                end)
             end
         end)
     end
 
-    local function stopDesktopFly()
-        FLYING = false
-        disconnectConn(renderConn); renderConn = nil
-        disconnectConn(keyDownConn); keyDownConn = nil
-        disconnectConn(keyUpConn);   keyUpConn   = nil
-        local hum = humanoid()
-        if hum then hum.PlatformStand = false end
-        clearInstance(bodyVelocity); bodyVelocity = nil
-        clearInstance(bodyGyro);     bodyGyro     = nil
-    end
-
-    ---------------------------------------------------------------------
-    -- Mobile Fly
-    ---------------------------------------------------------------------
-    local function startMobileFly()
-        if FLYING then return end
-        local root = hrp()
-        local hum  = humanoid()
-        if not root or not hum then return end
-
-        FLYING = true
-
-        bodyGyro     = Instance.new("BodyGyro")
-        bodyVelocity = Instance.new("BodyVelocity")
-        bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-        bodyGyro.P = 1000
-        bodyGyro.D = 50
-        bodyGyro.Parent = root
-
-        bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-        bodyVelocity.Velocity = Vector3.new()
-        bodyVelocity.Parent = root
-
-        local tiltAngle = math.rad(-5)
-
-        mobileAddedConn = lp.CharacterAdded:Connect(function()
-            root = hrp()
-            if not root then return end
-            clearInstance(bodyGyro); clearInstance(bodyVelocity)
-            bodyGyro = Instance.new("BodyGyro")
-            bodyVelocity = Instance.new("BodyVelocity")
-            bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-            bodyGyro.P = 1000
-            bodyGyro.D = 50
-            bodyGyro.Parent = root
-            bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-            bodyVelocity.Velocity = Vector3.new()
-            bodyVelocity.Parent = root
-        end)
-
-        mobileRenderConn = RunService.RenderStepped:Connect(function()
-            root = hrp()
-            local cam = workspace.CurrentCamera
-            if not root or not cam then return end
-            local humCheck = humanoid()
-            if humCheck then humCheck.PlatformStand = true end
-
-            bodyGyro.CFrame = cam.CFrame * CFrame.Angles(tiltAngle, 0, 0)
-
-            local move = Vector3.new()
-            local ok, controlModule = pcall(function()
-                return require(lp.PlayerScripts:WaitForChild("PlayerModule"):WaitForChild("ControlModule"))
-            end)
-            if ok and controlModule and controlModule.GetMoveVector then
-                move = controlModule:GetMoveVector()
-            end
-
-            local vel = Vector3.new()
-            vel = vel + cam.CFrame.RightVector * (move.X * (flySpeed * 50))
-            vel = vel - cam.CFrame.LookVector  * (move.Z * (flySpeed * 50))
-            bodyVelocity.Velocity = vel
-        end)
-    end
-
-    local function stopMobileFly()
-        disconnectConn(mobileRenderConn); mobileRenderConn = nil
-        disconnectConn(mobileAddedConn);  mobileAddedConn  = nil
-        local hum = humanoid()
-        if hum then hum.PlatformStand = false end
-        clearInstance(bodyVelocity); bodyVelocity = nil
-        clearInstance(bodyGyro);     bodyGyro     = nil
-        FLYING = false
-    end
-
-    local function startFly()
-        if UIS.TouchEnabled then
-            mobileFlyEnabled = true
-            startMobileFly()
-        else
-            mobileFlyEnabled = false
-            startDesktopFly()
+    local function disableInfiniteJump()
+        infJumpOn = false
+        C.State.Toggles.InfiniteJump = false
+        if infJumpCon then
+            infJumpCon:Disconnect()
+            infJumpCon = nil
         end
     end
 
-    privateStopFly = function()
-        if mobileFlyEnabled then
-            stopMobileFly()
-        else
-            stopDesktopFly()
+    tab:Toggle({
+        Title   = "Infinite Jump",
+        Value   = infJumpOn,
+        Callback = function(on)
+            if on then enableInfiniteJump() else disableInfiniteJump() end
         end
+    })
+
+    ------------------------------------------------------------------------
+    -- Fly (desktop-style, with slight forward tilt, no sideways flatten)
+    ------------------------------------------------------------------------
+
+    tab:Section({ Title = "Fly" })
+
+    local flyOn        = C.State.Toggles.Fly or false
+    local flySpeed     = C.Config.FlySpeed or 60
+    local flyBV        = nil
+    local flyBG        = nil
+    local flyHB        = nil
+    local flyInputCon  = nil
+
+    local moveDir      = Vector3.new()
+    local verticalDir  = 0
+
+    local function destroyFlyBodies()
+        if flyBV then flyBV:Destroy() flyBV = nil end
+        if flyBG then flyBG:Destroy() flyBG = nil end
     end
 
     local function stopFly()
-        if mobileFlyEnabled then
-            stopMobileFly()
-        else
-            stopDesktopFly()
+        flyOn = false
+        C.State.Toggles.Fly = false
+
+        if flyHB then flyHB:Disconnect() flyHB = nil end
+        if flyInputCon then flyInputCon:Disconnect() flyInputCon = nil end
+        destroyFlyBodies()
+
+        local hum = getHumanoid()
+        if hum then
+            pcall(function()
+                hum.PlatformStand = false
+            end)
+        end
+        moveDir = Vector3.new()
+        verticalDir = 0
+    end
+
+    local function ensureFlyBodies(root)
+        if not flyBV or not flyBV.Parent then
+            flyBV = Instance.new("BodyVelocity")
+            flyBV.Velocity = Vector3.new()
+            flyBV.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+            flyBV.Name     = "__FlyBV"
+            flyBV.Parent   = root
+        end
+        if not flyBG or not flyBG.Parent then
+            flyBG = Instance.new("BodyGyro")
+            flyBG.D = 1000
+            flyBG.P = 1e4
+            flyBG.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
+            flyBG.Name      = "__FlyBG"
+            flyBG.Parent    = root
         end
     end
 
-    ---------------------------------------------------------------------
-    -- Force Fly
-    ---------------------------------------------------------------------
-    local PITCH_DEADZONE = 0.22
+    local function beginFly()
+        if flyOn then return end
+        local root = getRoot()
+        local hum  = getHumanoid()
+        if not (root and hum) then return end
 
-    local function startForceFly()
-        if forceFlyConn then return end
-        local root = hrp()
-        local hum  = humanoid()
-        if not root or not hum then return end
+        flyOn = true
+        C.State.Toggles.Fly = true
+        moveDir     = Vector3.new()
+        verticalDir = 0
 
-        forceFlyEnabled  = true
-        forceDesiredPos  = root.Position
-        forceLastFaceDir = root.CFrame.LookVector
+        hum.PlatformStand = true
+        ensureFlyBodies(root)
 
-        forceFlyConn = RunService.RenderStepped:Connect(function(dt)
-            local r   = hrp()
-            local h   = humanoid()
-            local cam = workspace.CurrentCamera
-            if not r or not h or not cam then return end
+        if flyInputCon then
+            flyInputCon:Disconnect()
+            flyInputCon = nil
+        end
 
-            h.PlatformStand = true
+        flyInputCon = UIS.InputBegan:Connect(function(input, gp)
+            if gp then return end
+            if input.KeyCode == Enum.KeyCode.W then
+                moveDir = Vector3.new(moveDir.X, moveDir.Y, -1)
+            elseif input.KeyCode == Enum.KeyCode.S then
+                moveDir = Vector3.new(moveDir.X, moveDir.Y,  1)
+            elseif input.KeyCode == Enum.KeyCode.A then
+                moveDir = Vector3.new(-1, moveDir.Y, moveDir.Z)
+            elseif input.KeyCode == Enum.KeyCode.D then
+                moveDir = Vector3.new( 1, moveDir.Y, moveDir.Z)
+            elseif input.KeyCode == Enum.KeyCode.Space then
+                verticalDir = 1
+            elseif input.KeyCode == Enum.KeyCode.LeftControl
+                or input.KeyCode == Enum.KeyCode.LeftShift then
+                verticalDir = -1
+            elseif input.KeyCode == Enum.KeyCode.F then
+                -- F toggles fly
+                if flyOn then
+                    stopFly()
+                else
+                    beginFly()
+                end
+            end
+        end)
 
-            local move   = h.MoveDirection
-            local planar = Vector3.new(move.X, 0, move.Z)
-            local mag    = planar.Magnitude
-            if mag > 1e-3 then
-                planar = planar / mag
+        UIS.InputEnded:Connect(function(input, gp)
+            if gp then return end
+            if input.KeyCode == Enum.KeyCode.W or input.KeyCode == Enum.KeyCode.S then
+                moveDir = Vector3.new(moveDir.X, moveDir.Y, 0)
+            elseif input.KeyCode == Enum.KeyCode.A or input.KeyCode == Enum.KeyCode.D then
+                moveDir = Vector3.new(0, moveDir.Y, moveDir.Z)
+            elseif input.KeyCode == Enum.KeyCode.Space
+                or input.KeyCode == Enum.KeyCode.LeftControl
+                or input.KeyCode == Enum.KeyCode.LeftShift then
+                verticalDir = 0
+            end
+        end)
+
+        if flyHB then
+            flyHB:Disconnect()
+            flyHB = nil
+        end
+
+        flyHB = Run.RenderStepped:Connect(function()
+            if not flyOn then return end
+            local rootNow = getRoot()
+            if not rootNow then
+                stopFly()
+                return
+            end
+            ensureFlyBodies(rootNow)
+
+            local cam = WS.CurrentCamera
+            if not cam then return end
+
+            -- Horizontal move based on camera
+            local cf   = cam.CFrame
+            local look = cf.LookVector
+            local right = cf.RightVector
+
+            local horiz = (look * -moveDir.Z) + (right * moveDir.X)
+            horiz = Vector3.new(horiz.X, 0, horiz.Z)
+
+            local dir = horiz.Magnitude > 1e-3 and horiz.Unit or Vector3.new()
+            local vel = dir * flySpeed + Vector3.new(0, verticalDir * flySpeed, 0)
+
+            flyBV.Velocity = vel
+
+            -- Keep up vector global Y; add a small forward tilt
+            local faceAt = rootNow.Position + look
+            local baseCF = CFrame.lookAt(rootNow.Position, faceAt, Vector3.yAxis)
+            local tilt   = CFrame.Angles(math.rad(-5), 0, 0) -- slight forward tilt
+            flyBG.CFrame = baseCF * tilt
+        end)
+    end
+
+    tab:Toggle({
+        Title = "Fly (F to toggle)",
+        Value = flyOn,
+        Callback = function(on)
+            if on then
+                beginFly()
             else
-                planar = Vector3.zero
+                stopFly()
             end
-
-            local lookY = cam.CFrame.LookVector.Y
-            local vert  = 0
-            if mag > 1e-3 then
-                local a = math.abs(lookY)
-                if a > PITCH_DEADZONE then
-                    local t = (a - PITCH_DEADZONE) / (1 - PITCH_DEADZONE)
-                    vert = (lookY > 0 and 1 or -1) * t * (flySpeed * 50)
-                end
-            end
-
-            local delta = Vector3.zero
-            if mag > 1e-3 then
-                delta = delta + planar * (flySpeed * 50 * dt)
-            end
-            if vert ~= 0 then
-                delta = delta + Vector3.new(0, vert * dt, 0)
-            end
-
-            forceDesiredPos = (forceDesiredPos or r.Position) + delta
-
-            r.AssemblyLinearVelocity  = Vector3.new()
-            r.AssemblyAngularVelocity = Vector3.new()
-
-            if mag > 1e-3 then
-                forceLastFaceDir = planar
-            end
-
-            local face   = forceLastFaceDir or r.CFrame.LookVector
-            local faceAt = forceDesiredPos + Vector3.new(face.X, 0, face.Z)
-            r.CFrame = CFrame.new(
-                forceDesiredPos,
-                Vector3.new(faceAt.X, forceDesiredPos.Y, faceAt.Z)
-            )
-        end)
-    end
-
-    local function stopForceFly()
-        if not forceFlyConn then
-            forceFlyEnabled = false
-            return
         end
-        disconnectConn(forceFlyConn); forceFlyConn = nil
-        forceFlyEnabled  = false
-        forceDesiredPos  = nil
-        forceLastFaceDir = nil
-        local h = humanoid()
-        if h then h.PlatformStand = false end
-        local r = hrp()
-        if r then
-            r.AssemblyLinearVelocity  = Vector3.new()
-            r.AssemblyAngularVelocity = Vector3.new()
-        end
-    end
-
-    ---------------------------------------------------------------------
-    -- Walk Speed
-    ---------------------------------------------------------------------
-    local function setWalkSpeed(val)
-        local hum = humanoid()
-        if hum then hum.WalkSpeed = val end
-    end
-
-    RunService.Heartbeat:Connect(function()
-        if not speedEnabled then return end
-        local hum = humanoid()
-        if hum and hum.WalkSpeed ~= walkSpeedValue then
-            hum.WalkSpeed = walkSpeedValue
-        end
-    end)
-
-    ---------------------------------------------------------------------
-    -- Noclip
-    ---------------------------------------------------------------------
-    local function startNoclip()
-        disconnectConn(noclipConn)
-        noclipConn = RunService.Stepped:Connect(function()
-            local ch = lp.Character
-            if not ch then return end
-            for _, part in ipairs(ch:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    part.CanCollide = false
-                end
-            end
-        end)
-    end
-
-    local function stopNoclip()
-        disconnectConn(noclipConn); noclipConn = nil
-    end
-
-    ---------------------------------------------------------------------
-    -- Infinite Jump
-    ---------------------------------------------------------------------
-    local function startInfJump()
-        disconnectConn(jumpConn)
-        jumpConn = UIS.JumpRequest:Connect(function()
-            local hum = humanoid()
-            if hum then
-                hum:ChangeState(Enum.HumanoidStateType.Jumping)
-            end
-        end)
-    end
-
-    local function stopInfJump()
-        disconnectConn(jumpConn); jumpConn = nil
-    end
-
-    ---------------------------------------------------------------------
-    -- Player Highlighter (extracted from visuals.lua; always-on while enabled)
-    ---------------------------------------------------------------------
-    local PLAYER_HL_NAME = "__PlayerTrackerHL__"
-    local runningPlayers  = false
-
-    local function bestPart(model)
-        if not model or not model:IsA("Model") then return nil end
-        local hrpPart = model:FindFirstChild("HumanoidRootPart")
-        if hrpPart and hrpPart:IsA("BasePart") then return hrpPart end
-        if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
-            return model.PrimaryPart
-        end
-        return model:FindFirstChildWhichIsA("BasePart")
-    end
-
-    local function ensureHighlight(parent, name)
-        local hl = parent:FindFirstChild(name)
-        if hl and hl:IsA("Highlight") then return hl end
-        hl = Instance.new("Highlight")
-        hl.Name = name
-        hl.Adornee = parent
-        hl.FillTransparency = 1
-        hl.OutlineTransparency = 0
-        hl.OutlineColor = Color3.fromRGB(255, 255, 0)
-        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        hl.Parent = parent
-        return hl
-    end
-
-    local function clearHighlight(parent, name)
-        local hl = parent and parent:FindFirstChild(name)
-        if hl and hl:IsA("Highlight") then
-            hl:Destroy()
-        end
-    end
-
-    local function trackPlayer(plr)
-        if plr == lp then return end
-        local function attach(ch)
-            if not ch then return end
-            local h = ensureHighlight(ch, PLAYER_HL_NAME)
-            h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-            h.Enabled = true
-        end
-        if plr.Character then
-            attach(plr.Character)
-        end
-        plr.CharacterAdded:Connect(attach)
-    end
-
-    local function startPlayerTracker()
-        if runningPlayers then return end
-        runningPlayers = true
-
-        for _, p in ipairs(Players:GetPlayers()) do
-            trackPlayer(p)
-        end
-        Players.PlayerAdded:Connect(trackPlayer)
-
-        task.spawn(function()
-            while runningPlayers do
-                local lch  = lp.Character
-                local lhrp = lch and lch:FindFirstChild("HumanoidRootPart")
-                local R    = auraRadius()
-
-                for _, plr in ipairs(Players:GetPlayers()) do
-                    if plr ~= lp then
-                        local ch = plr.Character
-                        if ch then
-                            local h = ensureHighlight(ch, PLAYER_HL_NAME)
-                            h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                            h.Enabled = true
-
-                            if lhrp then
-                                local phrp = ch:FindFirstChild("HumanoidRootPart")
-                                local p0   = phrp and phrp.Position or (bestPart(ch) and bestPart(ch).Position)
-                                if p0 then
-                                    local d = (p0 - lhrp.Position).Magnitude
-                                    local t = math.clamp(d / math.max(R, 1), 0, 1)
-                                    -- near: solid outline, far: dimmer; but they're ALWAYS highlighted
-                                    h.FillTransparency    = 1 - (0.85 * t)
-                                    h.OutlineTransparency = 0.2 * (1 - t)
-                                end
-                            end
-                        end
-                    end
-                end
-
-                task.wait(0.25)
-            end
-
-            for _, plr in ipairs(Players:GetPlayers()) do
-                if plr ~= lp and plr.Character then
-                    clearHighlight(plr.Character, PLAYER_HL_NAME)
-                end
-            end
-        end)
-    end
-
-    local function stopPlayerTracker()
-        runningPlayers = false
-    end
-
-    ---------------------------------------------------------------------
-    -- UI Controls
-    ---------------------------------------------------------------------
-
-    -- Movement section
-    tab:Section({ Title = "Player • Movement", Icon = "activity" })
+    })
 
     tab:Slider({
         Title = "Fly Speed",
-        Value = { Min = 1, Max = 20, Default = 3 },
+        Value = {
+            Min     = 20,
+            Max     = 200,
+            Default = flySpeed
+        },
         Callback = function(v)
-            flySpeed = tonumber(v) or flySpeed
+            local n = tonumber(type(v) == "table" and (v.Value or v.Current or v.Default) or v)
+            if not n then return end
+            n = math.clamp(n, 20, 200)
+            flySpeed        = n
+            C.Config.FlySpeed = n
         end
     })
 
-    EnableFlyToggleCtrl = tab:Toggle({
-        Title = "Enable Fly",
-        Value = false,
-        Callback = function(state)
-            if state and forceFlyEnabled then
-                stopForceFly()
-                if ForceFlyToggleCtrl and ForceFlyToggleCtrl.Set then
-                    ForceFlyToggleCtrl:Set(false)
-                end
+    ------------------------------------------------------------------------
+    -- Godmode (DamagePlayer remote)
+    -- Two modes: Negative damage and Positive heal
+    ------------------------------------------------------------------------
+
+    tab:Section({ Title = "Godmode" })
+
+    local function getDamageRemote()
+        local folder = RS:FindFirstChild("RemoteEvents") or RS:FindFirstChild("Events") or RS
+        if not folder then return nil end
+        local ev = folder:FindFirstChild("DamagePlayer") or folder:FindFirstChild("Damage")
+        return ev
+    end
+
+    local GOD_INTERVAL = 0.5
+
+    local godNegOn     = C.State.Toggles.GodmodeNegative or false
+    local godPosOn     = C.State.Toggles.GodmodePositive or false
+    local negConn      = nil
+    local posConn      = nil
+    local negAcc       = 0
+    local posAcc       = 0
+
+    local function stopGodNegative()
+        godNegOn = false
+        C.State.Toggles.GodmodeNegative = false
+        if negConn then
+            negConn:Disconnect()
+            negConn = nil
+        end
+        negAcc = 0
+    end
+
+    local function stopGodPositive()
+        godPosOn = false
+        C.State.Toggles.GodmodePositive = false
+        if posConn then
+            posConn:Disconnect()
+            posConn = nil
+        end
+        posAcc = 0
+    end
+
+    local function startGodNegative()
+        if godNegOn then return end
+
+        local ev = getDamageRemote()
+        if not (ev and ev:IsA("RemoteEvent")) then return end
+
+        -- Ensure the other mode is off
+        if godPosOn then
+            stopGodPositive()
+        end
+
+        godNegOn = true
+        C.State.Toggles.GodmodeNegative = true
+        negAcc = 0
+
+        local function tick()
+            pcall(function()
+                ev:FireServer(-math.huge)
+            end)
+        end
+
+        tick()
+
+        if negConn then
+            negConn:Disconnect()
+            negConn = nil
+        end
+
+        negConn = Run.Heartbeat:Connect(function(dt)
+            if not godNegOn then return end
+            negAcc = negAcc + dt
+            if negAcc >= GOD_INTERVAL then
+                negAcc = 0
+                tick()
             end
-            flyEnabled = state
-            if flyEnabled then startFly() else stopFly() end
+        end)
+    end
+
+    local function startGodPositive()
+        if godPosOn then return end
+
+        local ev = getDamageRemote()
+        if not (ev and ev:IsA("RemoteEvent")) then return end
+
+        -- Ensure the other mode is off
+        if godNegOn then
+            stopGodNegative()
         end
-    })
 
-    tab:Divider()
-    tab:Section({ Title = "Walk Speed", Icon = "walk" })
+        godPosOn = true
+        C.State.Toggles.GodmodePositive = true
+        posAcc = 0
 
-    tab:Slider({
-        Title = "Speed",
-        Value = { Min = 16, Max = 150, Default = 50 },
-        Callback = function(v)
-            walkSpeedValue = tonumber(v) or walkSpeedValue
-            if speedEnabled then setWalkSpeed(walkSpeedValue) end
+        local function tick()
+            pcall(function()
+                ev:FireServer(math.huge)
+            end)
         end
-    })
 
-    tab:Toggle({
-        Title = "Enable Speed",
-        Value = true,
-        Callback = function(state)
-            speedEnabled = state
-            if state then
-                setWalkSpeed(walkSpeedValue)
-            else
-                setWalkSpeed(16)
+        tick()
+
+        if posConn then
+            posConn:Disconnect()
+            posConn = nil
+        end
+
+        posConn = Run.Heartbeat:Connect(function(dt)
+            if not godPosOn then return end
+            posAcc = posAcc + dt
+            if posAcc >= GOD_INTERVAL then
+                posAcc = 0
+                tick()
             end
-        end
-    })
-
-    tab:Divider()
-    tab:Section({ Title = "Utilities", Icon = "tool" })
+        end)
+    end
 
     tab:Toggle({
-        Title = "Noclip",
-        Value = false,
-        Callback = function(state)
-            if state then startNoclip() else stopNoclip() end
-        end
-    })
-
-    tab:Toggle({
-        Title = "Infinite Jump",
-        Value = true,
-        Callback = function(state)
-            if state then startInfJump() else stopInfJump() end
-        end
-    })
-
-    ForceFlyToggleCtrl = tab:Toggle({
-        Title = "Force Fly",
-        Value = false,
-        Callback = function(state)
-            if state and flyEnabled then
-                flyEnabled = false
-                stopFly()
-                if EnableFlyToggleCtrl and EnableFlyToggleCtrl.Set then
-                    EnableFlyToggleCtrl:Set(false)
-                end
-            end
-            if state then startForceFly() else stopForceFly() end
-        end
-    })
-
-    tab:Divider()
-    tab:Section({ Title = "Visuals", Icon = "target" })
-
-    -- Player Tracker toggle only (no slider)
-    tab:Toggle({
-        Title = "Player Tracker",
-        Value = C.State.Toggles.PlayerTracker or false,
+        Title = "Godmode (Negative Damage)",
+        Value = godNegOn,
         Callback = function(on)
-            C.State.Toggles.PlayerTracker = on
             if on then
-                startPlayerTracker()
+                startGodNegative()
             else
-                stopPlayerTracker()
+                stopGodNegative()
             end
         end
     })
 
-    ---------------------------------------------------------------------
-    -- Respawn handling
-    ---------------------------------------------------------------------
+    tab:Toggle({
+        Title = "Godmode (Positive Heal)",
+        Value = godPosOn,
+        Callback = function(on)
+            if on then
+                startGodPositive()
+            else
+                stopGodPositive()
+            end
+        end
+    })
+
+    ------------------------------------------------------------------------
+    -- Character respawn handling: re-apply movement + re-arm godmode if on
+    ------------------------------------------------------------------------
+
     lp.CharacterAdded:Connect(function()
-        if flyEnabled then
-            task.defer(function()
-                stopFly()
-                startFly()
-            end)
-        end
-        if forceFlyEnabled then
-            task.defer(function()
-                stopForceFly()
-                startForceFly()
-            end)
-        end
-        if speedEnabled then
-            task.defer(function()
-                setWalkSpeed(walkSpeedValue)
-            end)
-        end
+        task.defer(function()
+            applyMovementConfig()
+
+            if infJumpOn then
+                enableInfiniteJump()
+            end
+
+            if flyOn then
+                beginFly()
+            end
+
+            if godNegOn then
+                startGodNegative()
+            elseif godPosOn then
+                startGodPositive()
+            end
+        end)
     end)
 
-    -- Auto-start player tracker if enabled in state
-    if C.State.Toggles.PlayerTracker then
-        startPlayerTracker()
-    end
+    -- Initial apply on first load
+    task.defer(function()
+        applyMovementConfig()
+
+        if infJumpOn then
+            enableInfiniteJump()
+        end
+
+        if flyOn then
+            beginFly()
+        end
+
+        -- Per your request, both godmodes default OFF
+        -- but if state was persisted, re-arm them:
+        if godNegOn then
+            startGodNegative()
+        elseif godPosOn then
+            startGodPositive()
+        end
+    end)
 end
