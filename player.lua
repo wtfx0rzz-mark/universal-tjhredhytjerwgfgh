@@ -63,6 +63,7 @@ return function(C, R, UI)
         bodyVelocity.Parent = root
 
         local CONTROL = {F=0,B=0,L=0,R=0,Q=0,E=0}
+        local tiltAngle = math.rad(-5) -- slight forward tilt
 
         keyDownConn = UIS.InputBegan:Connect(function(input, gpe)
             if gpe or input.UserInputType ~= Enum.UserInputType.Keyboard then return end
@@ -92,7 +93,9 @@ return function(C, R, UI)
             if not cam or not root then return end
             local humCheck = humanoid()
             if humCheck then humCheck.PlatformStand = true end
-            bodyGyro.CFrame = cam.CFrame
+
+            -- slight forward tilt based on camera
+            bodyGyro.CFrame = cam.CFrame * CFrame.Angles(tiltAngle, 0, 0)
 
             local moveVec = Vector3.new()
             if CONTROL.F ~= 0 or CONTROL.B ~= 0 then
@@ -146,6 +149,8 @@ return function(C, R, UI)
         bodyVelocity.Velocity = Vector3.new()
         bodyVelocity.Parent = root
 
+        local tiltAngle = math.rad(-5) -- same slight forward tilt
+
         mobileAddedConn = Players.LocalPlayer.CharacterAdded:Connect(function()
             root = hrp()
             if not root then return end
@@ -167,7 +172,9 @@ return function(C, R, UI)
             if not root or not cam then return end
             local humCheck = humanoid()
             if humCheck then humCheck.PlatformStand = true end
-            bodyGyro.CFrame = cam.CFrame
+
+            -- slight forward tilt
+            bodyGyro.CFrame = cam.CFrame * CFrame.Angles(tiltAngle, 0, 0)
 
             local move = Vector3.new()
             local ok, controlModule = pcall(function()
@@ -254,9 +261,14 @@ return function(C, R, UI)
             r.AssemblyAngularVelocity = Vector3.new()
 
             if mag > 1e-3 then forceLastFaceDir = planar end
+
+            -- Restored original upright orientation logic
             local face = forceLastFaceDir or r.CFrame.LookVector
-            local faceAt = forceDesiredPos + Vector3.new(face.X, forceDesiredPos.Y, face.Z)
-            r.CFrame = CFrame.new(forceDesiredPos, faceAt)
+            local faceAt = forceDesiredPos + Vector3.new(face.X, 0, face.Z)
+            r.CFrame = CFrame.new(
+                forceDesiredPos,
+                Vector3.new(faceAt.X, forceDesiredPos.Y, faceAt.Z)
+            )
         end)
     end
 
