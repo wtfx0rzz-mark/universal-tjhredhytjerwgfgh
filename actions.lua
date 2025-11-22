@@ -1,19 +1,28 @@
 -- actions.lua
+-- 1337 Nights • Actions tab: Shockwave Nudge + sliders
+
 return function(C, R, UI)
     local function run()
         C  = C  or _G.C
         UI = UI or _G.UI
 
-        local Players  = (C and C.Services and C.Services.Players)  or game:GetService("Players")
-        local RS       = (C and C.Services and C.Services.RS)       or game:GetService("ReplicatedStorage")
-        local WS       = (C and C.Services and C.Services.WS)       or game:GetService("Workspace")
-        local Run      = (C and C.Services and C.Services.Run)      or game:GetService("RunService")
-        local lp       = Players.LocalPlayer
+        assert(C and C.Services, "actions.lua: missing C.Services")
+        assert(UI and UI.Tabs and (UI.Tabs.Actions or UI.Tabs.Main), "actions.lua: Actions/Main tab missing")
 
-        local Tabs = (UI and UI.Tabs) or {}
-        local tab  = Tabs.Actions or Tabs.Nudge or Tabs.Main or Tabs.Auto
+        local Players = C.Services.Players or game:GetService("Players")
+        local RS      = C.Services.RS      or game:GetService("ReplicatedStorage")
+        local WS      = C.Services.WS      or game:GetService("Workspace")
+        local Run     = C.Services.Run     or game:GetService("RunService")
+
+        local lp = C.LocalPlayer or Players.LocalPlayer
+
+        local Tabs = UI.Tabs or {}
+        local tab  = Tabs.Actions or Tabs.Nudge or Tabs.Main
         if not tab then return end
 
+        --------------------------------------------------------------------
+        -- Helpers
+        --------------------------------------------------------------------
         local function hrp(p)
             p = p or lp
             local ch = p.Character or p.CharacterAdded:Wait()
@@ -45,6 +54,7 @@ return function(C, R, UI)
             return t
         end
 
+        -- No-op collide snapshot (we never actually change CanCollide)
         local function setCollide(model, on, snap)
             local parts = getParts(model)
             if on and snap then
@@ -161,18 +171,24 @@ return function(C, R, UI)
             return fallback
         end
 
+        --------------------------------------------------------------------
+        -- Nudge config
+        --------------------------------------------------------------------
         local Nudge = {
             Dist     = 50,
             Up       = 20,
             Radius   = 15,
-            SelfSafe = 3.5
+            SelfSafe = 3.5,
         }
 
         local AutoNudge = {
             Enabled     = false,
-            MaxPerFrame = 16
+            MaxPerFrame = 16,
         }
 
+        --------------------------------------------------------------------
+        -- Impulse logic
+        --------------------------------------------------------------------
         local function preDrag(model)
             local started = safeStartDrag(model)
             if started then
@@ -192,6 +208,7 @@ return function(C, R, UI)
             local dist = away.Magnitude
             if dist < 1e-3 then return end
 
+            -- push out of "inside my hitbox" zone
             if dist < Nudge.SelfSafe then
                 local out = fromPos + away.Unit * (Nudge.SelfSafe + 0.5)
                 local snap0 = setCollide(model, false)
@@ -309,8 +326,7 @@ return function(C, R, UI)
 
             for _, part in ipairs(parts) do
                 if part:IsA("BasePart") and not part.Anchored then
-                    if myChar and part:IsDescendantOf(myChar) then
-                    else
+                    if not (myChar and part:IsDescendantOf(myChar)) then
                         local mdl = part:FindFirstAncestorOfClass("Model") or part
                         if not seen[mdl] then
                             seen[mdl] = true
@@ -328,8 +344,12 @@ return function(C, R, UI)
             end
         end
 
+        --------------------------------------------------------------------
+        -- EdgeButtons UI (Shockwave)
+        --------------------------------------------------------------------
         local playerGui = lp:FindFirstChildOfClass("PlayerGui") or lp:WaitForChild("PlayerGui")
         local edgeGui   = playerGui:FindFirstChild("EdgeButtons")
+
         if not edgeGui then
             edgeGui = Instance.new("ScreenGui")
             edgeGui.Name = "EdgeButtons"
@@ -374,6 +394,7 @@ return function(C, R, UI)
             shockBtn.Visible = false
             shockBtn.LayoutOrder = 50
             shockBtn.Parent = stack
+
             local corner = Instance.new("UICorner")
             corner.CornerRadius = UDim.new(0, 8)
             corner.Parent = shockBtn
@@ -390,11 +411,21 @@ return function(C, R, UI)
             end
         end)
 
-        C.State = C.State or { Toggles = {} }
-        C.State.Toggles = C.State.Toggles or {}
+        --------------------------------------------------------------------
+        -- WindUI controls (Actions tab)
+        --------------------------------------------------------------------
+        C.State              = C.State              or {}
+        C.State.Toggles      = C.State.Toggles      or {}
+        C.State.NudgeConfig  = C.State.NudgeConfig  or {}
+
+        -- restore previous values if present
+        if C.State.NudgeConfig.Dist  then Nudge.Dist  = C.State.NudgeConfig.Dist end
+        if C.State.NudgeConfig.Up    then Nudge.Up    = C.State.NudgeConfig.Up   end
+        if C.State.NudgeConfig.Radius then Nudge.Radius = C.State.NudgeConfig.Radius end
+
         local initialEdge = (C.State.Toggles.EdgeShockwave == true)
 
-        tab:Section({ Title = "Shockwave Nudge" })
+        tab:Section({ Title = "Shockwave Nudge", Icon = "zap" })
 
         tab:Toggle({
             Title = "Edge Button: Shockwave",
@@ -415,6 +446,7 @@ return function(C, R, UI)
                 local n = tonumber(type(v) == "table" and (v.Value or v.Current or v.Default) or v)
                 if n then
                     Nudge.Dist = math.clamp(math.floor(n + 0.5), 10, 160)
+                    C.State.NudgeConfig.Dist = Nudge.Dist
                 end
             end
         })
@@ -426,6 +458,7 @@ return function(C, R, UI)
                 local n = tonumber(type(v) == "table" and (v.Value or v.Current or v.Default) or v)
                 if n then
                     Nudge.Up = math.clamp(math.floor(n + 0.5), 5, 80)
+                    C.State.NudgeConfig.Up = Nudge.Up
                 end
             end
         })
@@ -437,6 +470,7 @@ return function(C, R, UI)
                 local n = tonumber(type(v) == "table" and (v.Value or v.Current or v.Default) or v)
                 if n then
                     Nudge.Radius = math.clamp(math.floor(n + 0.5), 5, 60)
+                    C.State.NudgeConfig.Radius = Nudge.Radius
                 end
             end
         })
@@ -487,6 +521,6 @@ return function(C, R, UI)
 
     local ok, err = pcall(run)
     if not ok then
-        warn("[Actions/Nudge] module error: " .. tostring(err))
+        warn("[Actions] module error: " .. tostring(err))
     end
 end
