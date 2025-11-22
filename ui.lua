@@ -6,10 +6,10 @@ local lp      = Players.LocalPlayer
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
 local Window = WindUI:CreateWindow({
-    Title            = "1337 Nights",
+    Title            = "Mark Universal",
     Icon             = "moon",
     Author           = "Mark",
-    Folder           = "1337Nights",
+    Folder           = "univrsl",
     Size             = UDim2.fromOffset(520, 360),
     Transparent      = false,
     Theme            = "Dark",
@@ -24,7 +24,7 @@ local Window = WindUI:CreateWindow({
             WindUI:Notify({
                 Title   = "User Info",
                 Content = "Logged In As: " .. (lp.DisplayName or lp.Name),
-                Duration = 3,
+                Duration = 2,
                 Icon    = "user",
             })
         end,
