@@ -1,64 +1,64 @@
 -- ui.lua
 
 local Players = game:GetService("Players")
-local lp = Players.LocalPlayer
+local lp      = Players.LocalPlayer
 
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
 local Window = WindUI:CreateWindow({
-    Title = "Universal Hub",
-    Icon = "grid-3x3",
-    Author = "Mark",
-    Folder = "UniversalHub",
-    Size = UDim2.fromOffset(500, 350),
-    Transparent = false,
-    Theme = "Dark",
-    Resizable = true,
-    SideBarWidth = 150,
-    HideSearchBar = false,
+    Title            = "1337 Nights",
+    Icon             = "moon",
+    Author           = "Mark",
+    Folder           = "1337Nights",
+    Size             = UDim2.fromOffset(520, 360),
+    Transparent      = false,
+    Theme            = "Dark",
+    Resizable        = true,
+    SideBarWidth     = 150,
+    HideSearchBar    = false,
     ScrollBarEnabled = true,
     User = {
-        Enabled = true,
+        Enabled   = true,
         Anonymous = false,
-        Callback = function()
+        Callback  = function()
             WindUI:Notify({
-                Title = "User Info",
+                Title   = "User Info",
                 Content = "Logged In As: " .. (lp.DisplayName or lp.Name),
                 Duration = 3,
-                Icon = "user",
+                Icon    = "user",
             })
         end,
     },
 })
 
--- Toggle key for entire UI
+-- Main toggle key
 Window:SetToggleKey(Enum.KeyCode.V)
 
 local Tabs = {
     Main = Window:Tab({
         Title = "Main",
-        Icon = "home",
-        Desc = "Main controls",
+        Icon  = "home",
+        Desc  = "Core controls",
     }),
 
     Player = Window:Tab({
         Title = "Player",
-        Icon = "user",
-        Desc = "Player controls",
+        Icon  = "user",
+        Desc  = "Movement / utilities / godmode",
+    }),
+
+    Visuals = Window:Tab({
+        Title = "Visuals",
+        Icon  = "eye",
+        Desc  = "ESP / tracking / visual helpers",
+    }),
+
+    Actions = Window:Tab({
+        Title = "Actions",
+        Icon  = "zap",
+        Desc  = "Shockwave nudge and utilities",
     }),
 }
-
--- Optional: simple status section on Main tab
-do
-    local section = Tabs.Main:Section({
-        Title = "Universal Hub",
-    })
-
-    section:Paragraph({
-        Title = "Status",
-        Content = "UI loaded successfully.",
-    })
-end
 
 return {
     Lib    = WindUI,
