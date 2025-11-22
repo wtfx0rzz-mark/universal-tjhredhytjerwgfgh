@@ -1,5 +1,5 @@
 -- player.lua
--- Universal hub • Player tab: movement + mobile fly + force fly + godmode
+-- Universal hub • Player tab: movement + mobile fly + force fly + noclip + godmode
 
 return function(C, R, UI)
     C  = C  or _G.C
@@ -190,6 +190,26 @@ return function(C, R, UI)
         end
     end
 
+    local function ensureFlyBodies(root)
+        if not bodyGyro or not bodyGyro.Parent then
+            bodyGyro = Instance.new("BodyGyro")
+            bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+            bodyGyro.P         = 1000
+            bodyGyro.D         = 50
+            bodyGyro.CFrame    = root.CFrame
+            bodyGyro.Name      = "__MobileFlyBG"
+            bodyGyro.Parent    = root
+        end
+
+        if not bodyVelocity or not bodyVelocity.Parent then
+            bodyVelocity = Instance.new("BodyVelocity")
+            bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+            bodyVelocity.Velocity = Vector3.new()
+            bodyVelocity.Name     = "__MobileFlyBV"
+            bodyVelocity.Parent   = root
+        end
+    end
+
     local function startMobileFly()
         if FLYING then return end
 
@@ -203,20 +223,7 @@ return function(C, R, UI)
         FLYING = true
 
         hum.PlatformStand = true
-
-        bodyGyro = Instance.new("BodyGyro")
-        bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-        bodyGyro.P         = 1000
-        bodyGyro.D         = 50
-        bodyGyro.CFrame    = root.CFrame
-        bodyGyro.Name      = "__MobileFlyBG"
-        bodyGyro.Parent    = root
-
-        bodyVelocity = Instance.new("BodyVelocity")
-        bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-        bodyVelocity.Velocity = Vector3.new()
-        bodyVelocity.Name     = "__MobileFlyBV"
-        bodyVelocity.Parent   = root
+        ensureFlyBodies(root)
 
         if flyRenderConn then
             flyRenderConn:Disconnect()
@@ -231,9 +238,10 @@ return function(C, R, UI)
             local root2 = ch2 and ch2:FindFirstChild("HumanoidRootPart")
             local cam2  = WS.CurrentCamera
 
-            if not (hum2 and root2 and cam2 and bodyGyro and bodyVelocity) then return end
+            if not (hum2 and root2 and cam2) then return end
 
             hum2.PlatformStand = true
+            ensureFlyBodies(root2)
             bodyGyro.CFrame    = cam2.CFrame
 
             local move = Vector3.new()
@@ -256,7 +264,6 @@ return function(C, R, UI)
         flyEnabled = true
         C.State.Toggles.Fly = true
 
-        -- keep modes exclusive
         if forceFlyOn and stopForceFly then
             stopForceFly()
         end
@@ -289,7 +296,6 @@ return function(C, R, UI)
 
         if not (hum and root and cam) then return end
 
-        -- keep modes exclusive
         if flyEnabled then
             stopFly()
         end
@@ -436,8 +442,55 @@ return function(C, R, UI)
     })
 
     ------------------------------------------------------------------------
+    -- Noclip
+    ------------------------------------------------------------------------
+
+    tab:Section({ Title = "Noclip" })
+
+    local noclipOn = C.State.Toggles.Noclip or false
+
+    local function applyNoclipToCharacter(ch)
+        if not ch then return end
+        for _, d in ipairs(ch:GetDescendants()) do
+            if d:IsA("BasePart") then
+                d.CanCollide = false
+            end
+        end
+    end
+
+    local function enableNoclip()
+        if noclipOn then return end
+        noclipOn = true
+        C.State.Toggles.Noclip = true
+        applyNoclipToCharacter(lp.Character)
+    end
+
+    local function disableNoclip()
+        noclipOn = false
+        C.State.Toggles.Noclip = false
+        local ch = lp.Character
+        if not ch then return end
+        for _, d in ipairs(ch:GetDescendants()) do
+            if d:IsA("BasePart") then
+                d.CanCollide = true
+            end
+        end
+    end
+
+    tab:Toggle({
+        Title = "Noclip",
+        Value = noclipOn,
+        Callback = function(on)
+            if on then
+                enableNoclip()
+            else
+                disableNoclip()
+            end
+        end
+    })
+
+    ------------------------------------------------------------------------
     -- Godmode (DamagePlayer remote)
-    -- Two modes: Negative damage and Positive heal
     ------------------------------------------------------------------------
 
     tab:Section({ Title = "Godmode" })
@@ -594,6 +647,10 @@ return function(C, R, UI)
                 startFly()
             end
 
+            if noclipOn then
+                applyNoclipToCharacter(lp.Character)
+            end
+
             if godNegOn then
                 startGodNegative()
             elseif godPosOn then
@@ -616,10 +673,76 @@ return function(C, R, UI)
             startFly()
         end
 
+        if noclipOn then
+            applyNoclipToCharacter(lp.Character)
+        end
+
         if godNegOn then
             startGodNegative()
         elseif godPosOn then
             startGodPositive()
         end
     end)
+
+    ------------------------------------------------------------------------
+    -- Continuous enforcement loop
+    ------------------------------------------------------------------------
+
+    if not C.State.__PlayerMaintainConn then
+        local acc = 0
+        C.State.__PlayerMaintainConn = Run.Heartbeat:Connect(function(dt)
+            acc += dt
+            if acc < 0.25 then return end
+            acc = 0
+
+            local ch  = lp.Character
+            local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+
+            if hum then
+                local ws = tonumber(C.Config.WalkSpeed)  or DEFAULT_SPEED
+                local jp = tonumber(C.Config.JumpPower) or DEFAULT_JUMPPOWER
+
+                if math.abs(hum.WalkSpeed - ws) > 1e-2 then
+                    hum.WalkSpeed = ws
+                end
+
+                if (not hum.UseJumpPower) or math.abs(hum.JumpPower - jp) > 1e-2 then
+                    hum.UseJumpPower = true
+                    hum.JumpPower    = jp
+                end
+            end
+
+            if noclipOn and ch then
+                applyNoclipToCharacter(ch)
+            end
+
+            if infJumpOn and not infJumpCon then
+                enableInfiniteJump()
+            end
+
+            if flyEnabled and not FLYING then
+                startMobileFly()
+            elseif (not flyEnabled) and FLYING then
+                stopMobileFly()
+            end
+
+            if forceFlyOn and not forceFlyConn then
+                startForceFly()
+            elseif (not forceFlyOn) and forceFlyConn then
+                stopForceFly()
+            end
+
+            if godNegOn and not negConn then
+                startGodNegative()
+            elseif (not godNegOn) and negConn then
+                stopGodNegative()
+            end
+
+            if godPosOn and not posConn then
+                startGodPositive()
+            elseif (not godPosOn) and posConn then
+                stopGodPositive()
+            end
+        end)
+    end
 end
