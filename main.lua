@@ -36,6 +36,16 @@ _G.C  = C
 _G.R  = _G.R or {}
 _G.UI = UI
 
+do
+    local tab = UI and UI.Tabs and UI.Tabs.Main
+    if tab then
+        tab:Paragraph({
+            Title = "Welcome",
+            Desc  = "Welcome",
+        })
+    end
+end
+
 -- Modules to load
 local paths = {
     Player  = "https://raw.githubusercontent.com/wtfx0rzz-mark/universal-tjhredhytjerwgfgh/main/player.lua",
