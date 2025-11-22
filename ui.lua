@@ -1,18 +1,21 @@
 -- ui.lua
--- Wind UI wrapper
 local WindLibrary = loadstring(game:HttpGet("https://raw.githubusercontent.com/synw0lf/WindUI/main/source.lua"))()
 
 local UI = {}
 
 function UI:CreateWindow(cfg)
-    return WindLibrary:CreateWindow(cfg)
+    local window = WindLibrary:CreateWindow(cfg)
+    self.WindowTabs = {}
+    function window:CreateTab(name)
+        local tab = WindLibrary:CreateTab(name)
+        UI.WindowTabs[name] = tab
+        return tab
+    end
+    return window
 end
 
-function UI:AttachSettingsTab(tab)
-    tab:CreateLabel("UI Settings")
-    tab:CreateToggle("Dark Mode", WindLibrary.Theme == "Dark", function(state)
-        WindLibrary:SetTheme(state and "Dark" or "Light")
-    end)
+function UI:Ready()
+    print("Wind UI initialized")
 end
 
 return UI
