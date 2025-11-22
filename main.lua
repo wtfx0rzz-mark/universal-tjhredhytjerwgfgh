@@ -1,17 +1,21 @@
+-- main.lua
+
 repeat task.wait() until game:IsLoaded()
 
-local function httpget(url)
-    return game:HttpGet(url)
+local function httpget(u)
+    return game:HttpGet(u)
 end
 
--- Load UI core
+-- Load UI module
 local UI = (function()
     local ok, ret = pcall(function()
         return loadstring(httpget("https://raw.githubusercontent.com/wtfx0rzz-mark/universal-tjhredhytjerwgfgh/main/ui.lua"))()
     end)
+
     if ok and type(ret) == "table" then
         return ret
     end
+
     warn("ui.lua load error: " .. tostring(ret))
     error("ui.lua failed to load")
 end)()
@@ -32,39 +36,18 @@ _G.C  = C
 _G.R  = _G.R or {}
 _G.UI = UI
 
--- Modules to load
-local modules = {
+-- Modules to load (add more later if you want)
+local paths = {
     Player = "https://raw.githubusercontent.com/wtfx0rzz-mark/universal-tjhredhytjerwgfgh/main/player.lua",
 }
 
--- Load each module safely
-for name, url in pairs(modules) do
-    local ok, fn = pcall(function()
-        return loadstring(httpget(url))()
+for name, url in pairs(paths) do
+    local ok, mod = pcall(function()
+        return loadstring(game:HttpGet(url))()
     end)
-    if ok and type(fn) == "function" then
-        task.spawn(fn, _G.C, _G.R, _G.UI)
+    if ok and type(mod) == "function" then
+        pcall(mod, _G.C, _G.R, _G.UI)
     else
-        warn(("Failed to load module %s: %s"):format(name, tostring(fn)))
+        warn(("Failed to load module %s from %s"):format(name, url))
     end
 end
-
--- Initialize Wind UI window
-local Window = UI:CreateWindow({
-    Name = "Universal UI",
-    Themeable = true,
-    DefaultSize = UDim2.new(0, 500, 0, 400),
-    Keybind = Enum.KeyCode.RightShift
-})
-
-local Tabs = {
-    Main   = Window:CreateTab("Main"),
-    Player = Window:CreateTab("Player"),
-}
-
-Tabs.Main:CreateLabel("Universal UI Loaded!")
-Tabs.Main:CreateButton("Test Button", function()
-    print("Universal UI works!")
-end)
-
-Window:Ready()
