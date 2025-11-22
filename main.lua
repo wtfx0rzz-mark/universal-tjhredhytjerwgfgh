@@ -36,18 +36,20 @@ _G.C  = C
 _G.R  = _G.R or {}
 _G.UI = UI
 
--- Modules to load (add more later if you want)
+-- Modules to load
 local paths = {
-    Player = "https://raw.githubusercontent.com/wtfx0rzz-mark/universal-tjhredhytjerwgfgh/main/player.lua",
+    Player  = "https://raw.githubusercontent.com/wtfx0rzz-mark/universal-tjhredhytjerwgfgh/main/player.lua",
+    Actions = "https://raw.githubusercontent.com/wtfx0rzz-mark/universal-tjhredhytjerwgfgh/main/actions.lua",
+    Visuals = "https://raw.githubusercontent.com/wtfx0rzz-mark/universal-tjhredhytjerwgfgh/main/visuals.lua",
 }
 
 for name, url in pairs(paths) do
     local ok, mod = pcall(function()
-        return loadstring(game:HttpGet(url))()
+        return loadstring(httpget(url))()
     end)
     if ok and type(mod) == "function" then
         pcall(mod, _G.C, _G.R, _G.UI)
     else
-        warn(("Failed to load module %s from %s"):format(name, url))
+        warn(("Failed to load module %s from %s: %s"):format(name, url, tostring(mod)))
     end
 end
