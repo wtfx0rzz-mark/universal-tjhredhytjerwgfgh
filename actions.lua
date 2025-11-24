@@ -1,6 +1,4 @@
 -- actions.lua
--- 1337 Nights • Actions tab: Shockwave Nudge + sliders
-
 return function(C, R, UI)
     local function run()
         C  = C  or _G.C
@@ -20,9 +18,6 @@ return function(C, R, UI)
         local tab  = Tabs.Actions or Tabs.Nudge or Tabs.Main
         if not tab then return end
 
-        --------------------------------------------------------------------
-        -- Helpers
-        --------------------------------------------------------------------
         local function hrp(p)
             p = p or lp
             local ch = p.Character or p.CharacterAdded:Wait()
@@ -54,7 +49,6 @@ return function(C, R, UI)
             return t
         end
 
-        -- No-op collide snapshot (we never actually change CanCollide)
         local function setCollide(model, on, snap)
             local parts = getParts(model)
             if on and snap then
@@ -171,9 +165,6 @@ return function(C, R, UI)
             return fallback
         end
 
-        --------------------------------------------------------------------
-        -- Nudge config
-        --------------------------------------------------------------------
         local Nudge = {
             Dist     = 50,
             Up       = 20,
@@ -186,9 +177,45 @@ return function(C, R, UI)
             MaxPerFrame = 16,
         }
 
-        --------------------------------------------------------------------
-        -- Impulse logic
-        --------------------------------------------------------------------
+        -- player fling state (same behavior as in troll.lua)
+        local flingEnabled     = false
+        local flingPower       = 10000
+        local flingLoopStarted = false
+
+        local function ensureFlingLoop()
+            if flingLoopStarted then return end
+            flingLoopStarted = true
+
+            task.spawn(function()
+                local c, root, vel
+                local movel = 0.1
+                while true do
+                    Run.Heartbeat:Wait()
+                    if flingEnabled then
+                        while flingEnabled and not (c and c.Parent and root and root.Parent) do
+                            Run.Heartbeat:Wait()
+                            c = lp.Character
+                            root = c and c:FindFirstChild("HumanoidRootPart")
+                        end
+
+                        if flingEnabled and root and root.Parent then
+                            vel = root.Velocity
+                            root.Velocity = vel * flingPower + Vector3.new(0, flingPower, 0)
+                            Run.RenderStepped:Wait()
+                            if flingEnabled and c and c.Parent and root and root.Parent then
+                                root.Velocity = vel
+                            end
+                            Run.Stepped:Wait()
+                            if flingEnabled and c and c.Parent and root and root.Parent then
+                                root.Velocity = vel + Vector3.new(0, movel, 0)
+                                movel = -movel
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+
         local function preDrag(model)
             local started = safeStartDrag(model)
             if started then
@@ -208,7 +235,6 @@ return function(C, R, UI)
             local dist = away.Magnitude
             if dist < 1e-3 then return end
 
-            -- push out of "inside my hitbox" zone
             if dist < Nudge.SelfSafe then
                 local out = fromPos + away.Unit * (Nudge.SelfSafe + 0.5)
                 local snap0 = setCollide(model, false)
@@ -344,9 +370,6 @@ return function(C, R, UI)
             end
         end
 
-        --------------------------------------------------------------------
-        -- EdgeButtons UI (Shockwave)
-        --------------------------------------------------------------------
         local playerGui = lp:FindFirstChildOfClass("PlayerGui") or lp:WaitForChild("PlayerGui")
         local edgeGui   = playerGui:FindFirstChild("EdgeButtons")
 
@@ -411,14 +434,10 @@ return function(C, R, UI)
             end
         end)
 
-        --------------------------------------------------------------------
-        -- WindUI controls (Actions tab)
-        --------------------------------------------------------------------
         C.State              = C.State              or {}
         C.State.Toggles      = C.State.Toggles      or {}
         C.State.NudgeConfig  = C.State.NudgeConfig  or {}
 
-        -- restore previous values if present
         if C.State.NudgeConfig.Dist  then Nudge.Dist  = C.State.NudgeConfig.Dist end
         if C.State.NudgeConfig.Up    then Nudge.Up    = C.State.NudgeConfig.Up   end
         if C.State.NudgeConfig.Radius then Nudge.Radius = C.State.NudgeConfig.Radius end
@@ -517,6 +536,31 @@ return function(C, R, UI)
         if shockBtn then
             shockBtn.Visible = initialEdge
         end
+
+        -- fling UI wiring (same semantics as in troll.lua)
+        tab:Section({ Title = "Fling Players" })
+
+        tab:Slider({
+            Title = "Fling Power",
+            Value = { Min = 5000, Max = 55000, Default = flingPower },
+            Callback = function(v)
+                local n = tonumber(type(v) == "table" and (v.Value or v.Current or v.Default) or v)
+                if n then
+                    flingPower = math.clamp(math.floor(n + 0.5), 5000, 55000)
+                end
+            end
+        })
+
+        tab:Toggle({
+            Title = "Fling Players",
+            Value = flingEnabled,
+            Callback = function(on)
+                flingEnabled = (on == true)
+                if flingEnabled then
+                    ensureFlingLoop()
+                end
+            end
+        })
     end
 
     local ok, err = pcall(run)
