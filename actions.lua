@@ -541,11 +541,11 @@ return function(C, R, UI)
         tab:Section({ Title = "Fling Players" })
 tab:Slider({
     Title = "Fling Power",
-    Value = { Min = 5000, Max = 55000, Default = flingPower },
+    Value = { Min = 500, Max = 55000, Default = flingPower },
     Callback = function(v)
         local n = tonumber(type(v) == "table" and (v.Value or v.Current or v.Default) or v)
         if n then
-            flingPower = math.clamp(math.floor(n + 0.5), 5000, 55000)
+            flingPower = math.clamp(math.floor(n + 0.5), 500, 55000)
         end
     end
 })
