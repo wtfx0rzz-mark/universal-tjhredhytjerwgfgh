@@ -1,5 +1,5 @@
 -- player.lua
--- Universal hub • Player tab: movement + mobile fly + force fly + noclip + godmode
+-- Universal hub • Player tab: movement + mobile fly + force fly + noclip + godmode + instant interact
 
 return function(C, R, UI)
     C  = C  or _G.C
@@ -12,6 +12,7 @@ return function(C, R, UI)
     local UIS      = Services.UIS      or game:GetService("UserInputService")
     local RS       = Services.RS       or game:GetService("ReplicatedStorage")
     local WS       = Services.WS       or game:GetService("Workspace")
+    local PPS      = Services.PPS      or game:GetService("ProximityPromptService")
 
     local lp = C.LocalPlayer or Players.LocalPlayer
     if not (lp and UI and UI.Tabs and UI.Tabs.Player) then return end
@@ -160,7 +161,7 @@ return function(C, R, UI)
     local bodyVelocity  = nil
     local flyRenderConn = nil
 
-    local startForceFly, stopForceFly  -- forward-declared, defined below
+    local startForceFly, stopForceFly
 
     local function stopMobileFly()
         if not FLYING then return end
@@ -417,7 +418,7 @@ return function(C, R, UI)
             local n = tonumber(type(v) == "table" and (v.Value or v.Current or v.Default) or v)
             if not n then return end
             n = math.clamp(n, 20, 200)
-            flySpeed        = n
+            flySpeed          = n
             C.Config.FlySpeed = n
         end
     })
@@ -485,6 +486,135 @@ return function(C, R, UI)
                 enableNoclip()
             else
                 disableNoclip()
+            end
+        end
+    })
+
+    ------------------------------------------------------------------------
+    -- Instant Interact (from auto.lua)
+    ------------------------------------------------------------------------
+
+    tab:Section({ Title = "Interactions" })
+
+    local instantOn = (C.State.Toggles.InstantInteract ~= false) -- default true unless explicitly set false
+    C.State.Toggles.InstantInteract = instantOn
+
+    local INSTANT_HOLD, TRIGGER_COOLDOWN = 0.2, 0.2
+    local EXCLUDE_NAME_SUBSTR = { "door", "closet", "gate", "hatch" }
+    local EXCLUDE_ANCESTOR_SUBSTR = { "closetdoors", "closet", "door", "landmarks" }
+
+    local UID_OPEN_KEY = tostring(lp.UserId) .. "Opened"
+
+    local function strfindAny(s, list)
+        s = string.lower(s or "")
+        for _, w in ipairs(list) do
+            if string.find(s, w, 1, true) then return true end
+        end
+        return false
+    end
+
+    local function shouldSkipPrompt(p)
+        if not p or not p.Parent then return true end
+        if strfindAny(p.Name, EXCLUDE_NAME_SUBSTR) then return true end
+        pcall(function()
+            if strfindAny(p.ObjectText, EXCLUDE_NAME_SUBSTR) then error(true) end
+            if strfindAny(p.ActionText, EXCLUDE_NAME_SUBSTR) then error(true) end
+        end)
+        local a = p.Parent
+        while a and a ~= workspace do
+            if strfindAny(a.Name, EXCLUDE_ANCESTOR_SUBSTR) then return true end
+            a = a.Parent
+        end
+        return false
+    end
+
+    local promptDurations = setmetatable({}, { __mode = "k" })
+    local shownConn, trigConn, hiddenConn
+
+    local function restorePrompt(prompt)
+        local orig = promptDurations[prompt]
+        if orig ~= nil and prompt and prompt.Parent then
+            pcall(function() prompt.HoldDuration = orig end)
+        end
+        promptDurations[prompt] = nil
+    end
+
+    local function tagChestFromPrompt(prompt)
+        if not prompt then return end
+        local node = prompt
+        for _ = 1, 8 do
+            if not node then break end
+            if node:IsA("Model") then
+                local n = node.Name
+                if type(n) == "string" and (n:match("Chest%d*$") or n:match("Chest$")) then
+                    pcall(function()
+                        node:SetAttribute(UID_OPEN_KEY, true)
+                    end)
+                    break
+                end
+            end
+            node = node.Parent
+        end
+    end
+
+    local function onPromptShown(prompt)
+        if not prompt or not prompt:IsA("ProximityPrompt") then return end
+        if shouldSkipPrompt(prompt) then return end
+        if promptDurations[prompt] == nil then
+            promptDurations[prompt] = prompt.HoldDuration
+        end
+        if prompt and prompt.Parent and not shouldSkipPrompt(prompt) then
+            pcall(function() prompt.HoldDuration = INSTANT_HOLD end)
+        end
+    end
+
+    local function enableInstantInteract()
+        if shownConn then return end
+        shownConn = PPS.PromptShown:Connect(onPromptShown)
+
+        trigConn = PPS.PromptTriggered:Connect(function(prompt, player)
+            if player ~= lp or shouldSkipPrompt(prompt) then return end
+            tagChestFromPrompt(prompt)
+
+            if TRIGGER_COOLDOWN and TRIGGER_COOLDOWN > 0 then
+                pcall(function() prompt.Enabled = false end)
+                task.delay(TRIGGER_COOLDOWN, function()
+                    if prompt and prompt.Parent then
+                        pcall(function() prompt.Enabled = true end)
+                    end
+                end)
+            end
+
+            restorePrompt(prompt)
+        end)
+
+        hiddenConn = PPS.PromptHidden:Connect(function(prompt)
+            if shouldSkipPrompt(prompt) then return end
+            restorePrompt(prompt)
+        end)
+    end
+
+    local function disableInstantInteract()
+        if shownConn then shownConn:Disconnect(); shownConn = nil end
+        if trigConn then trigConn:Disconnect(); trigConn = nil end
+        if hiddenConn then hiddenConn:Disconnect(); hiddenConn = nil end
+        for p, _ in pairs(promptDurations) do
+            restorePrompt(p)
+        end
+    end
+
+    if instantOn then enableInstantInteract() end
+
+    tab:Toggle({
+        Title = "Instant Interact",
+        Value = instantOn,
+        Callback = function(state)
+            instantOn = (state == true)
+            C.State.Toggles.InstantInteract = instantOn
+            if instantOn then
+                enableInstantInteract()
+            else
+                disableInstantInteract()
             end
         end
     })
@@ -656,10 +786,19 @@ return function(C, R, UI)
             elseif godPosOn then
                 startGodPositive()
             end
+
+            if instantOn and not shownConn then
+                enableInstantInteract()
+            elseif (not instantOn) and shownConn then
+                disableInstantInteract()
+            end
         end)
     end)
 
+    ------------------------------------------------------------------------
     -- Initial apply on first load
+    ------------------------------------------------------------------------
+
     task.defer(function()
         applyMovementConfig()
 
@@ -681,6 +820,12 @@ return function(C, R, UI)
             startGodNegative()
         elseif godPosOn then
             startGodPositive()
+        end
+
+        if instantOn and not shownConn then
+            enableInstantInteract()
+        elseif (not instantOn) and shownConn then
+            disableInstantInteract()
         end
     end)
 
@@ -742,6 +887,12 @@ return function(C, R, UI)
                 startGodPositive()
             elseif (not godPosOn) and posConn then
                 stopGodPositive()
+            end
+
+            if instantOn and not shownConn then
+                enableInstantInteract()
+            elseif (not instantOn) and shownConn then
+                disableInstantInteract()
             end
         end)
     end
