@@ -180,39 +180,84 @@ return function(C, R, UI)
         -- player fling state (same behavior as in troll.lua)
         local flingEnabled     = false
         local flingPower       = 10000
-        local flingLoopStarted = false
+
+        local flingConn = nil
+        local FLING_MOVE_THRESH = 0.06
+
+        local function getHum()
+            local ch = lp.Character
+            if not ch then return nil end
+            return ch:FindFirstChildOfClass("Humanoid")
+        end
+
+        local function getHRP()
+            local ch = lp.Character
+            if not ch then return nil end
+            return ch:FindFirstChild("HumanoidRootPart")
+        end
+
+        local function stopFlingNow()
+            flingEnabled = false
+            local r = getHRP()
+            if r then
+                pcall(function()
+                    r.AssemblyAngularVelocity = Vector3.zero
+                    local lv = r.AssemblyLinearVelocity
+                    if lv.Magnitude > 120 then
+                        r.AssemblyLinearVelocity = Vector3.zero
+                    end
+                end)
+            end
+        end
 
         local function ensureFlingLoop()
-            if flingLoopStarted then return end
-            flingLoopStarted = true
+            if flingConn then return end
 
-            task.spawn(function()
-                local c, root, vel
-                local movel = 0.1
-                while true do
-                    Run.Heartbeat:Wait()
-                    if flingEnabled then
-                        while flingEnabled and not (c and c.Parent and root and root.Parent) do
-                            Run.Heartbeat:Wait()
-                            c = lp.Character
-                            root = c and c:FindFirstChild("HumanoidRootPart")
-                        end
+            flingConn = Run.Heartbeat:Connect(function()
+                if not flingEnabled then return end
 
-                        if flingEnabled and root and root.Parent then
-                            vel = root.Velocity
-                            root.Velocity = vel * flingPower + Vector3.new(0, flingPower, 0)
-                            Run.RenderStepped:Wait()
-                            if flingEnabled and c and c.Parent and root and root.Parent then
-                                root.Velocity = vel
-                            end
-                            Run.Stepped:Wait()
-                            if flingEnabled and c and c.Parent and root and root.Parent then
-                                root.Velocity = vel + Vector3.new(0, movel, 0)
-                                movel = -movel
-                            end
-                        end
+                local hum = getHum()
+                local r   = getHRP()
+                if not (hum and r) then return end
+
+                local toggles = (C and C.State and C.State.Toggles) or {}
+                local isFlying = (toggles.Fly == true) or (toggles.ForceFly == true) or (hum.PlatformStand == true)
+
+                local move = hum.MoveDirection
+                local moving = (move.Magnitude > FLING_MOVE_THRESH)
+
+                if (not isFlying) and (not moving) then
+                    if r.AssemblyAngularVelocity.Magnitude > 5 then
+                        r.AssemblyAngularVelocity = Vector3.zero
                     end
+                    return
                 end
+
+                local dir
+                if moving then
+                    dir = Vector3.new(move.X, 0, move.Z)
+                else
+                    local cam = WS.CurrentCamera
+                    local fwd = cam and cam.CFrame.LookVector or Vector3.new(0, 0, -1)
+                    dir = Vector3.new(fwd.X, 0, fwd.Z)
+                end
+
+                local mag = dir.Magnitude
+                if mag > 1e-3 then
+                    dir = dir / mag
+                else
+                    dir = Vector3.new(0, 0, 1)
+                end
+
+                local pwr = math.clamp(tonumber(flingPower) or 10000, 50, 55000)
+                local horizVel = math.clamp(pwr / 350, 10, 160)
+                local spin = math.clamp(pwr / 250, 25, 300)
+
+                local current = r.AssemblyLinearVelocity
+                local target  = Vector3.new(dir.X * horizVel, math.clamp(current.Y, -60, 60), dir.Z * horizVel)
+
+                r.AssemblyLinearVelocity  = target
+                r.AssemblyAngularVelocity = Vector3.new(0, spin, 0)
             end)
         end
 
@@ -539,25 +584,26 @@ return function(C, R, UI)
 
         -- fling UI wiring (same semantics as in troll.lua)
         tab:Section({ Title = "Fling Players" })
-tab:Slider({
-    Title = "Fling Power",
-    Value = { Min = 50, Max = 55000, Default = flingPower },
-    Callback = function(v)
-        local n = tonumber(type(v) == "table" and (v.Value or v.Current or v.Default) or v)
-        if n then
-            flingPower = math.clamp(math.floor(n + 0.5), 50, 55000)
-        end
-    end
-})
-
+        tab:Slider({
+            Title = "Fling Power",
+            Value = { Min = 50, Max = 55000, Default = flingPower },
+            Callback = function(v)
+                local n = tonumber(type(v) == "table" and (v.Value or v.Current or v.Default) or v)
+                if n then
+                    flingPower = math.clamp(math.floor(n + 0.5), 50, 55000)
+                end
+            end
+        })
 
         tab:Toggle({
-            Title = "Fling Players",
+            Title = "Fling Players (Walk=Move Required, Fly=No Move Required)",
             Value = flingEnabled,
             Callback = function(on)
                 flingEnabled = (on == true)
                 if flingEnabled then
                     ensureFlingLoop()
+                else
+                    stopFlingNow()
                 end
             end
         })
