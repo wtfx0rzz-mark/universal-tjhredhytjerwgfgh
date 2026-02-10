@@ -45,7 +45,7 @@ return function(C, R, UI)
     -- Movement: WalkSpeed / JumpPower
     ------------------------------------------------------------------------
 
-    local DEFAULT_SPEED     = 16
+    local DEFAULT_SPEED     = 50
     local DEFAULT_JUMPPOWER = 50
 
     local function applyMovementConfig()
