@@ -180,9 +180,10 @@ return function(C, R, UI)
         -- player fling state (same behavior as in troll.lua)
         local flingEnabled     = false
         local flingPower       = 10000
+        local flingLoopStarted = false
 
-        local flingConn = nil
         local FLING_MOVE_THRESH = 0.06
+        local lastDisableAt = 0
 
         local function getHum()
             local ch = lp.Character
@@ -198,66 +199,93 @@ return function(C, R, UI)
 
         local function stopFlingNow()
             flingEnabled = false
+            lastDisableAt = os.clock()
+
             local r = getHRP()
             if r then
                 pcall(function()
                     r.AssemblyAngularVelocity = Vector3.zero
                     local lv = r.AssemblyLinearVelocity
-                    if lv.Magnitude > 120 then
-                        r.AssemblyLinearVelocity = Vector3.zero
+                    if math.abs(lv.Y) > 25 then
+                        lv = Vector3.new(lv.X, 0, lv.Z)
                     end
+                    if lv.Magnitude > 60 then
+                        lv = Vector3.zero
+                    end
+                    r.AssemblyLinearVelocity = lv
                 end)
             end
         end
 
         local function ensureFlingLoop()
-            if flingConn then return end
+            if flingLoopStarted then return end
+            flingLoopStarted = true
 
-            flingConn = Run.Heartbeat:Connect(function()
-                if not flingEnabled then return end
+            task.spawn(function()
+                local c, root, hum
+                local movel = 0.1
 
-                local hum = getHum()
-                local r   = getHRP()
-                if not (hum and r) then return end
+                while true do
+                    Run.Heartbeat:Wait()
 
-                local toggles = (C and C.State and C.State.Toggles) or {}
-                local isFlying = (toggles.Fly == true) or (toggles.ForceFly == true) or (hum.PlatformStand == true)
-
-                local move = hum.MoveDirection
-                local moving = (move.Magnitude > FLING_MOVE_THRESH)
-
-                if (not isFlying) and (not moving) then
-                    if r.AssemblyAngularVelocity.Magnitude > 5 then
-                        r.AssemblyAngularVelocity = Vector3.zero
+                    -- small "post-disable" damping to prevent the sky-bounce you described
+                    if (os.clock() - lastDisableAt) < 0.25 then
+                        local r = getHRP()
+                        if r then
+                            pcall(function()
+                                r.AssemblyAngularVelocity = Vector3.zero
+                                local lv = r.AssemblyLinearVelocity
+                                if lv.Magnitude > 80 or math.abs(lv.Y) > 35 then
+                                    r.AssemblyLinearVelocity = Vector3.zero
+                                end
+                            end)
+                        end
                     end
-                    return
+
+                    if not flingEnabled then
+                        movel = 0.1
+                    end
+
+                    if flingEnabled then
+                        while flingEnabled and not (c and c.Parent and root and root.Parent and hum) do
+                            Run.Heartbeat:Wait()
+                            c = lp.Character
+                            root = c and c:FindFirstChild("HumanoidRootPart")
+                            hum = c and c:FindFirstChildOfClass("Humanoid")
+                        end
+
+                        if flingEnabled and root and root.Parent and hum then
+                            local toggles = (C and C.State and C.State.Toggles) or {}
+                            local isFlying = (toggles.Fly == true) or (toggles.ForceFly == true) or (hum.PlatformStand == true)
+
+                            local move = hum.MoveDirection
+                            local moving = (move.Magnitude > FLING_MOVE_THRESH)
+
+                            -- KEY CHANGE:
+                            -- - Walking: require movement (prevents bumping -> self-fling)
+                            -- - Flying: no movement required (works anytime while flying)
+                            if (not isFlying) and (not moving) then
+                                movel = 0.1
+                            else
+                                local pwr = math.clamp(tonumber(flingPower) or 10000, 50, 55000)
+
+                                local vel = root.AssemblyLinearVelocity
+                                root.AssemblyLinearVelocity = vel * pwr + Vector3.new(0, pwr, 0)
+
+                                Run.RenderStepped:Wait()
+                                if flingEnabled and c and c.Parent and root and root.Parent then
+                                    root.AssemblyLinearVelocity = vel
+                                end
+
+                                Run.Stepped:Wait()
+                                if flingEnabled and c and c.Parent and root and root.Parent then
+                                    root.AssemblyLinearVelocity = vel + Vector3.new(0, movel, 0)
+                                    movel = -movel
+                                end
+                            end
+                        end
+                    end
                 end
-
-                local dir
-                if moving then
-                    dir = Vector3.new(move.X, 0, move.Z)
-                else
-                    local cam = WS.CurrentCamera
-                    local fwd = cam and cam.CFrame.LookVector or Vector3.new(0, 0, -1)
-                    dir = Vector3.new(fwd.X, 0, fwd.Z)
-                end
-
-                local mag = dir.Magnitude
-                if mag > 1e-3 then
-                    dir = dir / mag
-                else
-                    dir = Vector3.new(0, 0, 1)
-                end
-
-                local pwr = math.clamp(tonumber(flingPower) or 10000, 50, 55000)
-                local horizVel = math.clamp(pwr / 350, 10, 160)
-                local spin = math.clamp(pwr / 250, 25, 300)
-
-                local current = r.AssemblyLinearVelocity
-                local target  = Vector3.new(dir.X * horizVel, math.clamp(current.Y, -60, 60), dir.Z * horizVel)
-
-                r.AssemblyLinearVelocity  = target
-                r.AssemblyAngularVelocity = Vector3.new(0, spin, 0)
             end)
         end
 
