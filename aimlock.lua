@@ -17,12 +17,17 @@ return function(C, R, UI)
     C.State         = C.State  or {}
     C.State.Toggles = C.State.Toggles or {}
 
-    local aimlockOn     = C.State.Toggles.Aimlock or false
+    local aimlockOn    = C.State.Toggles.Aimlock or false
     local aimlockTarget = nil
     local aimlockConn   = nil
-    local snapRadius    = tonumber(C.Config.AimlockSnapRadius) or 80
-    local aimlockRange  = tonumber(C.Config.AimlockRange)      or 150
-    local SMOOTHING     = 0.12
+    local snapRadius   = tonumber(C.Config.AimlockSnapRadius) or 80
+    local aimlockRange = tonumber(C.Config.AimlockRange)      or 150
+    local SMOOTHING    = 0.12
+
+    local lockPlayers  = C.State.Toggles.AimlockPlayers ~= false
+    local lockNPCs     = C.State.Toggles.AimlockNPCs    or false
+
+    local npcFolder    = nil
 
     local cam = WS.CurrentCamera
 
@@ -87,15 +92,14 @@ return function(C, R, UI)
         return onScreen, screenPos
     end
 
-    local function getTargetPart(player)
-        local ch = player.Character
-        if not ch then return nil end
-        return ch:FindFirstChild("Head") or ch:FindFirstChild("HumanoidRootPart")
+    local function getTargetPart(model)
+        if not model then return nil end
+        return model:FindFirstChild("Head") or model:FindFirstChild("HumanoidRootPart")
     end
 
-    local function isAlive(player)
-        local ch  = player.Character
-        local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+    local function isAliveModel(model)
+        if not model then return false end
+        local hum = model:FindFirstChildOfClass("Humanoid")
         return hum and hum.Health > 0
     end
 
@@ -111,15 +115,98 @@ return function(C, R, UI)
         return (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
     end
 
+    local playerCharSet = {}
+
+    local function rebuildPlayerCharSet()
+        playerCharSet = {}
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p.Character then
+                playerCharSet[p.Character] = true
+            end
+        end
+    end
+
+    Players.PlayerAdded:Connect(function(p)
+        p.CharacterAdded:Connect(function(ch)
+            playerCharSet[ch] = true
+        end)
+    end)
+
+    Players.PlayerRemoving:Connect(function(p)
+        if p.Character then
+            playerCharSet[p.Character] = nil
+        end
+    end)
+
+    for _, p in ipairs(Players:GetPlayers()) do
+        p.CharacterAdded:Connect(function(ch)
+            playerCharSet[ch] = true
+        end)
+        if p.Character then
+            playerCharSet[p.Character] = true
+        end
+    end
+
+    local function isPlayerCharacter(model)
+        return playerCharSet[model] == true
+    end
+
+    local function tryDetectNpcFolder(model)
+        if npcFolder then return end
+        local node = model.Parent
+        while node and node ~= WS do
+            if node ~= WS and node:IsA("Folder") or node:IsA("Model") then
+                if node.Parent == WS then
+                    npcFolder = node
+                    return
+                end
+            end
+            node = node.Parent
+        end
+    end
+
+    local function getNPCSearchRoot()
+        if npcFolder and npcFolder.Parent then
+            return npcFolder
+        end
+        return WS
+    end
+
+    local function getCandidates()
+        local candidates = {}
+
+        if lockPlayers then
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p == lp then continue end
+                local ch = p.Character
+                if ch and isAliveModel(ch) then
+                    table.insert(candidates, ch)
+                end
+            end
+        end
+
+        if lockNPCs then
+            local root = getNPCSearchRoot()
+            for _, model in ipairs(root:GetChildren()) do
+                if not model:IsA("Model") then continue end
+                if isPlayerCharacter(model) then continue end
+                if model == lp.Character then continue end
+                if not isAliveModel(model) then continue end
+                local part = getTargetPart(model)
+                if not part then continue end
+                table.insert(candidates, model)
+            end
+        end
+
+        return candidates
+    end
+
     local function findBestTarget()
         local best     = nil
         local bestDist = math.huge
 
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player == lp then continue end
-            if not isAlive(player) then continue end
-
-            local part = getTargetPart(player)
+        for _, model in ipairs(getCandidates()) do
+            local part = getTargetPart(model)
             if not part then continue end
 
             local onScreen = isOnScreen(part.Position)
@@ -131,11 +218,21 @@ return function(C, R, UI)
             local screenDist = screenDistFromCenter(part.Position)
             if screenDist < snapRadius and screenDist < bestDist then
                 bestDist = screenDist
-                best     = player
+                best     = model
             end
         end
 
         return best
+    end
+
+    local function getTargetModel(target)
+        if not target then return nil end
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p.Character == target then
+                return target
+            end
+        end
+        return target
     end
 
     local function startAimlock()
@@ -147,7 +244,7 @@ return function(C, R, UI)
             cam = WS.CurrentCamera
 
             if aimlockTarget then
-                if not isAlive(aimlockTarget) or not aimlockTarget.Character then
+                if not isAliveModel(aimlockTarget) then
                     aimlockTarget = nil
                     hideUnlockButton()
                     return
@@ -209,6 +306,9 @@ return function(C, R, UI)
                 local found = findBestTarget()
                 if found then
                     aimlockTarget = found
+                    if lockNPCs and not isPlayerCharacter(found) then
+                        tryDetectNpcFolder(found)
+                    end
                     showUnlockButton()
                 end
             end
@@ -223,6 +323,8 @@ return function(C, R, UI)
         aimlockOn = false
     end
 
+    rebuildPlayerCharSet()
+
     tab:Section({ Title = "Aimlock" })
 
     tab:Toggle({
@@ -232,9 +334,46 @@ return function(C, R, UI)
             aimlockOn = (on == true)
             C.State.Toggles.Aimlock = aimlockOn
             if aimlockOn then
+                rebuildPlayerCharSet()
                 startAimlock()
             else
                 stopAimlock()
+            end
+        end
+    })
+
+    tab:Toggle({
+        Title    = "Lock Players",
+        Value    = lockPlayers,
+        Callback = function(on)
+            lockPlayers = (on == true)
+            C.State.Toggles.AimlockPlayers = lockPlayers
+            if aimlockTarget and not lockPlayers and isPlayerCharacter(aimlockTarget) then
+                aimlockTarget = nil
+                hideUnlockButton()
+            end
+        end
+    })
+
+    tab:Toggle({
+        Title    = "Lock NPCs",
+        Value    = lockNPCs,
+        Callback = function(on)
+            lockNPCs = (on == true)
+            C.State.Toggles.AimlockNPCs = lockNPCs
+            if aimlockTarget and not lockNPCs and not isPlayerCharacter(aimlockTarget) then
+                aimlockTarget = nil
+                hideUnlockButton()
+            end
+        end
+    })
+
+    tab:Toggle({
+        Title    = "Reset NPC Folder",
+        Value    = false,
+        Callback = function(on)
+            if on then
+                npcFolder = nil
             end
         end
     })
@@ -274,6 +413,7 @@ return function(C, R, UI)
     lp.CharacterAdded:Connect(function()
         aimlockTarget = nil
         hideUnlockButton()
+        rebuildPlayerCharSet()
         if aimlockOn and not aimlockConn then
             startAimlock()
         end
