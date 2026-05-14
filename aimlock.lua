@@ -8,7 +8,7 @@ return function(C, R, UI)
     local Run      = Services.Run     or game:GetService("RunService")
     local WS       = Services.WS      or game:GetService("Workspace")
 
-    local lp  = C.LocalPlayer or Players.LocalPlayer
+    local lp = C.LocalPlayer or Players.LocalPlayer
     if not (lp and UI and UI.Tabs and UI.Tabs.Combat) then return end
 
     local tab = UI.Tabs.Combat
@@ -17,43 +17,46 @@ return function(C, R, UI)
     C.State         = C.State  or {}
     C.State.Toggles = C.State.Toggles or {}
 
-    local aimlockOn       = C.State.Toggles.Aimlock or false
-    local aimlockTarget   = nil
-    local aimlockConn     = nil
-    local snapRadius      = tonumber(C.Config.AimlockSnapRadius) or 80
-    local aimlockRange    = tonumber(C.Config.AimlockRange)      or 150
-    local SMOOTHING       = 0.12
+    local aimlockOn     = C.State.Toggles.Aimlock or false
+    local aimlockTarget = nil
+    local aimlockConn   = nil
+    local snapRadius    = tonumber(C.Config.AimlockSnapRadius) or 80
+    local aimlockRange  = tonumber(C.Config.AimlockRange)      or 150
+    local SMOOTHING     = 0.12
 
     local cam = WS.CurrentCamera
 
     local unlockGui = nil
     local unlockBtn = nil
 
+    local hideUnlockButton
+    local showUnlockButton
+
     local function buildUnlockButton()
         if unlockGui then return end
 
         local screenGui = Instance.new("ScreenGui")
-        screenGui.Name            = "__AimlockUnlockGui"
-        screenGui.ResetOnSpawn    = false
-        screenGui.DisplayOrder    = 999
-        screenGui.IgnoreGuiInset  = true
+        screenGui.Name           = "__AimlockUnlockGui"
+        screenGui.ResetOnSpawn   = false
+        screenGui.DisplayOrder   = 999
+        screenGui.IgnoreGuiInset = true
 
         local btn = Instance.new("TextButton")
-        btn.Size            = UDim2.new(0, 90, 0, 28)
-        btn.Position        = UDim2.new(1, -100, 0.5, 80)
+        btn.Size             = UDim2.new(0, 90, 0, 28)
+        btn.Position         = UDim2.new(1, -100, 0.5, 80)
         btn.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-        btn.BorderSizePixel = 0
-        btn.Text            = "Unlock"
-        btn.TextColor3      = Color3.fromRGB(180, 255, 120)
-        btn.TextSize        = 13
-        btn.Font            = Enum.Font.GothamBold
-        btn.AutoButtonColor = true
+        btn.BorderSizePixel  = 0
+        btn.Text             = "Unlock"
+        btn.TextColor3       = Color3.fromRGB(180, 255, 120)
+        btn.TextSize         = 13
+        btn.Font             = Enum.Font.GothamBold
+        btn.AutoButtonColor  = true
 
         local corner = Instance.new("UICorner")
         corner.CornerRadius = UDim.new(0, 6)
-        corner.Parent = btn
+        corner.Parent       = btn
 
-        btn.Parent    = screenGui
+        btn.Parent       = screenGui
         screenGui.Parent = lp.PlayerGui
 
         unlockBtn = btn
@@ -65,7 +68,7 @@ return function(C, R, UI)
         end)
     end
 
-    function hideUnlockButton()
+    hideUnlockButton = function()
         if unlockGui then
             unlockGui:Destroy()
             unlockGui = nil
@@ -73,14 +76,14 @@ return function(C, R, UI)
         end
     end
 
-    local function showUnlockButton()
+    showUnlockButton = function()
         if not unlockGui then
             buildUnlockButton()
         end
     end
 
     local function isOnScreen(worldPos)
-        local screenPos, onScreen = cam:WorldToViewportPoint(worldPos)
+        local screenPos, onScreen = cam:WorldToScreenPoint(worldPos)
         return onScreen, screenPos
     end
 
@@ -90,14 +93,9 @@ return function(C, R, UI)
         return ch:FindFirstChild("Head") or ch:FindFirstChild("HumanoidRootPart")
     end
 
-    local function getHumanoid(player)
-        local ch = player.Character
-        if not ch then return nil end
-        return ch:FindFirstChildOfClass("Humanoid")
-    end
-
     local function isAlive(player)
-        local hum = getHumanoid(player)
+        local ch  = player.Character
+        local hum = ch and ch:FindFirstChildOfClass("Humanoid")
         return hum and hum.Health > 0
     end
 
@@ -169,8 +167,8 @@ return function(C, R, UI)
                     return
                 end
 
-                local targetCF  = CFrame.new(cam.CFrame.Position, part.Position)
-                cam.CFrame = cam.CFrame:Lerp(targetCF, SMOOTHING)
+                local targetCF = CFrame.new(cam.CFrame.Position, part.Position)
+                cam.CFrame     = cam.CFrame:Lerp(targetCF, SMOOTHING)
             else
                 local found = findBestTarget()
                 if found then
@@ -216,7 +214,7 @@ return function(C, R, UI)
             local n = tonumber(type(v) == "table" and (v.Value or v.Current or v.Default) or v)
             if not n then return end
             n = math.clamp(n, 20, 300)
-            snapRadius             = n
+            snapRadius                 = n
             C.Config.AimlockSnapRadius = n
         end
     })
