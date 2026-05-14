@@ -6,7 +6,6 @@ local function httpget(u)
     return game:HttpGet(u)
 end
 
--- Load UI module
 local UI = (function()
     local ok, ret = pcall(function()
         return loadstring(httpget("https://raw.githubusercontent.com/wtfx0rzz-mark/universal-tjhredhytjerwgfgh/main/ui.lua"))()
@@ -20,7 +19,6 @@ local UI = (function()
     error("ui.lua failed to load")
 end)()
 
--- Core context
 local C = {}
 C.Services = {
     Players = game:GetService("Players"),
@@ -46,9 +44,9 @@ do
     end
 end
 
--- Modules to load
 local paths = {
     Player  = "https://raw.githubusercontent.com/wtfx0rzz-mark/universal-tjhredhytjerwgfgh/main/player.lua",
+    Combat  = "https://raw.githubusercontent.com/wtfx0rzz-mark/universal-tjhredhytjerwgfgh/main/aimlock.lua",
     Actions = "https://raw.githubusercontent.com/wtfx0rzz-mark/universal-tjhredhytjerwgfgh/main/actions.lua",
     Visuals = "https://raw.githubusercontent.com/wtfx0rzz-mark/universal-tjhredhytjerwgfgh/main/visuals.lua",
 }
