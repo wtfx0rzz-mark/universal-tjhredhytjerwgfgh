@@ -167,8 +167,28 @@ return function(C, R, UI)
                     return
                 end
 
-                local targetCF     = CFrame.new(cam.CFrame.Position, part.Position)
-                local currentCF    = cam.CFrame
+                local currentScreenDist = screenDistFromCenter(part.Position)
+                local closer = findBestTarget()
+                if closer and closer ~= aimlockTarget then
+                    local closerPart = getTargetPart(closer)
+                    if closerPart then
+                        local closerDist = screenDistFromCenter(closerPart.Position)
+                        if closerDist < currentScreenDist then
+                            aimlockTarget = closer
+                            part = closerPart
+                        end
+                    end
+                end
+
+                local activePart = getTargetPart(aimlockTarget)
+                if not activePart then
+                    aimlockTarget = nil
+                    hideUnlockButton()
+                    return
+                end
+
+                local targetCF  = CFrame.new(cam.CFrame.Position, activePart.Position)
+                local currentCF = cam.CFrame
 
                 local currentYaw   = math.atan2(-currentCF.LookVector.X, -currentCF.LookVector.Z)
                 local targetYaw    = math.atan2(-targetCF.LookVector.X, -targetCF.LookVector.Z)
