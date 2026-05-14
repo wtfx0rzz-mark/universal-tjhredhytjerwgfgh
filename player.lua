@@ -353,8 +353,18 @@ return function(C, R, UI)
             local isMoving = move.Magnitude > 0.1
 
             if isMoving then
-                vel = vel + right * (move.X * flySpeed)
-                vel = vel - look  * (move.Z * flySpeed)
+                local flatRight   = Vector3.new(right.X, 0, right.Z)
+                local flatLookDir = Vector3.new(look.X, 0, look.Z)
+
+                if flatRight.Magnitude > 1e-3 then
+                    flatRight = flatRight.Unit
+                end
+                if flatLookDir.Magnitude > 1e-3 then
+                    flatLookDir = flatLookDir.Unit
+                end
+
+                vel = vel + flatRight   * (move.X * flySpeed)
+                vel = vel - flatLookDir * (move.Z * flySpeed)
 
                 local PITCH_DEADZONE = 0.22
                 local a = math.abs(lookY)
