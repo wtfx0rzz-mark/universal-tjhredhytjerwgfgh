@@ -167,8 +167,24 @@ return function(C, R, UI)
                     return
                 end
 
-                local targetCF = CFrame.new(cam.CFrame.Position, part.Position)
-                cam.CFrame     = cam.CFrame:Lerp(targetCF, SMOOTHING)
+                local targetCF     = CFrame.new(cam.CFrame.Position, part.Position)
+                local currentCF    = cam.CFrame
+
+                local currentYaw   = math.atan2(-currentCF.LookVector.X, -currentCF.LookVector.Z)
+                local targetYaw    = math.atan2(-targetCF.LookVector.X, -targetCF.LookVector.Z)
+                local currentPitch = math.asin(math.clamp(currentCF.LookVector.Y, -1, 1))
+                local targetPitch  = math.asin(math.clamp(targetCF.LookVector.Y,  -1, 1))
+
+                local newYaw   = currentYaw   + (targetYaw   - currentYaw)   * SMOOTHING
+                local newPitch = currentPitch + (targetPitch - currentPitch) * SMOOTHING
+
+                newPitch = math.clamp(newPitch, -math.rad(80), math.rad(80))
+
+                local newCF = CFrame.new(currentCF.Position)
+                    * CFrame.Angles(0, newYaw, 0)
+                    * CFrame.Angles(newPitch, 0, 0)
+
+                cam.CFrame = newCF
             else
                 local found = findBestTarget()
                 if found then
