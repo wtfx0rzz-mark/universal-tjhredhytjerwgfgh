@@ -176,7 +176,7 @@ return function(C, R, UI)
         if not bodyVelocity or not bodyVelocity.Parent then
             bodyVelocity = Instance.new("BodyVelocity")
             bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-            bodyVelocity.Velocity = Vector3.new()
+            bodyVelocity.Velocity = Vector3.zero
             bodyVelocity.Name     = "__MobileFlyBV"
             bodyVelocity.Parent   = root
         end
@@ -213,8 +213,7 @@ return function(C, R, UI)
             bodyGyro.CFrame = cam2.CFrame
 
             local move = getMoveVector()
-
-            local vel = Vector3.zero
+            local vel  = Vector3.zero
             vel = vel + cam2.CFrame.RightVector * (move.X * flySpeed)
             vel = vel - cam2.CFrame.LookVector  * (move.Z * flySpeed)
 
@@ -245,7 +244,7 @@ return function(C, R, UI)
             if not bodyVelocity or not bodyVelocity.Parent then
                 bodyVelocity = Instance.new("BodyVelocity")
                 bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-                bodyVelocity.Velocity = Vector3.new()
+                bodyVelocity.Velocity = Vector3.zero
                 bodyVelocity.Name     = "__MobileFlyBV"
                 bodyVelocity.Parent   = root2
             end
@@ -296,7 +295,6 @@ return function(C, R, UI)
         C.State.Toggles.ForceFly = true
 
         forceHeldPos = root.Position
-
         hum.PlatformStand = true
 
         ffGyro = Instance.new("BodyGyro")
@@ -309,7 +307,7 @@ return function(C, R, UI)
 
         ffVel = Instance.new("BodyVelocity")
         ffVel.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-        ffVel.Velocity = Vector3.new()
+        ffVel.Velocity = Vector3.zero
         ffVel.Name     = "__ForceFlyBV"
         ffVel.Parent   = root
 
@@ -340,7 +338,7 @@ return function(C, R, UI)
             if not ffVel or not ffVel.Parent then
                 ffVel = Instance.new("BodyVelocity")
                 ffVel.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-                ffVel.Velocity = Vector3.new()
+                ffVel.Velocity = Vector3.zero
                 ffVel.Name     = "__ForceFlyBV"
                 ffVel.Parent   = root2
             end
@@ -413,7 +411,7 @@ return function(C, R, UI)
             if not ffVel or not ffVel.Parent then
                 ffVel = Instance.new("BodyVelocity")
                 ffVel.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-                ffVel.Velocity = Vector3.new()
+                ffVel.Velocity = Vector3.zero
                 ffVel.Name     = "__ForceFlyBV"
                 ffVel.Parent   = root2
             end
@@ -769,49 +767,66 @@ return function(C, R, UI)
         end
     })
 
-    lp.CharacterAdded:Connect(function()
-        cachedControlModule = nil
-        task.defer(function()
-            applyMovementConfig()
-            if infJumpOn then enableInfiniteJump() end
-            if forceFlyOn then
-                startForceFly()
-            elseif flyEnabled then
-                startFly()
-            end
-            if noclipOn then applyNoclipToCharacter(lp.Character) end
-            if godNegOn then
-                startGodNegative()
-            elseif godPosOn then
-                startGodPositive()
-            end
-            if instantOn and not shownConn then
-                enableInstantInteract()
-            elseif (not instantOn) and shownConn then
-                disableInstantInteract()
-            end
-        end)
-    end)
+    local function doRespawnSetup(ch)
+        ch:WaitForChild("HumanoidRootPart", 10)
+        ch:WaitForChild("Humanoid", 10)
 
-    task.defer(function()
+        local hum = ch:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.Changed:Wait()
+        end
+
+        task.wait(0.2)
+
         applyMovementConfig()
         if infJumpOn then enableInfiniteJump() end
+
         if forceFlyOn then
             startForceFly()
         elseif flyEnabled then
             startFly()
         end
-        if noclipOn then applyNoclipToCharacter(lp.Character) end
+
+        if noclipOn then applyNoclipToCharacter(ch) end
+
         if godNegOn then
             startGodNegative()
         elseif godPosOn then
             startGodPositive()
         end
+
         if instantOn and not shownConn then
             enableInstantInteract()
         elseif (not instantOn) and shownConn then
             disableInstantInteract()
         end
+    end
+
+    lp.CharacterAdded:Connect(function(ch)
+        cachedControlModule = nil
+
+        FLYING = false
+        if flyRenderConn then flyRenderConn:Disconnect(); flyRenderConn = nil end
+        if flyHealConn   then flyHealConn:Disconnect();   flyHealConn   = nil end
+        if bodyVelocity  then pcall(function() bodyVelocity:Destroy() end); bodyVelocity = nil end
+        if bodyGyro      then pcall(function() bodyGyro:Destroy() end);     bodyGyro     = nil end
+
+        if forceFlyConn     then forceFlyConn:Disconnect();     forceFlyConn     = nil end
+        if forceFlyHealConn then forceFlyHealConn:Disconnect(); forceFlyHealConn = nil end
+        if ffGyro then pcall(function() ffGyro:Destroy() end); ffGyro = nil end
+        if ffVel  then pcall(function() ffVel:Destroy()  end); ffVel  = nil end
+
+        task.spawn(function()
+            doRespawnSetup(ch)
+        end)
+    end)
+
+    task.spawn(function()
+        local ch = lp.Character
+        if not ch then
+            ch = lp.CharacterAdded:Wait()
+        end
+        doRespawnSetup(ch)
     end)
 
     if not C.State.__PlayerMaintainConn then
