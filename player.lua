@@ -16,22 +16,13 @@ return function(C, R, UI)
 
     local tab = UI.Tabs.Player
 
-    C.Config         = C.Config or {}
-    C.State          = C.State  or {}
-    C.State.Toggles  = C.State.Toggles or {}
-
-    local function getCharacter()
-        return lp.Character or lp.CharacterAdded:Wait()
-    end
+    C.Config        = C.Config or {}
+    C.State         = C.State  or {}
+    C.State.Toggles = C.State.Toggles or {}
 
     local function getHumanoid()
         local ch = lp.Character or lp.CharacterAdded:Wait()
         return ch:FindFirstChildOfClass("Humanoid")
-    end
-
-    local function getRoot()
-        local ch = lp.Character or lp.CharacterAdded:Wait()
-        return ch:FindFirstChild("HumanoidRootPart")
     end
 
     local DEFAULT_SPEED     = 50
@@ -45,6 +36,29 @@ return function(C, R, UI)
         hum.UseJumpPower = true
         hum.WalkSpeed    = ws
         hum.JumpPower    = jp
+    end
+
+    local cachedControlModule = nil
+
+    local function getControlModule()
+        if cachedControlModule then return cachedControlModule end
+        local ok, cm = pcall(function()
+            return require(lp.PlayerScripts:WaitForChild("PlayerModule"):WaitForChild("ControlModule"))
+        end)
+        if ok and cm and cm.GetMoveVector then
+            cachedControlModule = cm
+            return cm
+        end
+        return nil
+    end
+
+    local function getMoveVector()
+        local cm = getControlModule()
+        if not cm then return Vector3.zero end
+        local ok, mv = pcall(function() return cm:GetMoveVector() end)
+        if not ok or not mv then return Vector3.zero end
+        if mv.Magnitude < 0.1 then return Vector3.zero end
+        return mv
     end
 
     tab:Section({ Title = "Movement" })
@@ -125,11 +139,11 @@ return function(C, R, UI)
     local flyEnabled  = C.State.Toggles.Fly or false
     local forceFlyOn  = C.State.Toggles.ForceFly or false
 
-    local FLYING         = false
-    local bodyGyro       = nil
-    local bodyVelocity   = nil
-    local flyRenderConn  = nil
-    local flyHealConn    = nil
+    local FLYING        = false
+    local bodyGyro      = nil
+    local bodyVelocity  = nil
+    local flyRenderConn = nil
+    local flyHealConn   = nil
 
     local startForceFly, stopForceFly
 
@@ -198,15 +212,9 @@ return function(C, R, UI)
             ensureFlyBodies(root2)
             bodyGyro.CFrame = cam2.CFrame
 
-            local move = Vector3.new()
-            local ok, controlModule = pcall(function()
-                return require(lp.PlayerScripts:WaitForChild("PlayerModule"):WaitForChild("ControlModule"))
-            end)
-            if ok and controlModule and controlModule.GetMoveVector then
-                move = controlModule:GetMoveVector()
-            end
+            local move = getMoveVector()
 
-            local vel = Vector3.new()
+            local vel = Vector3.zero
             vel = vel + cam2.CFrame.RightVector * (move.X * flySpeed)
             vel = vel - cam2.CFrame.LookVector  * (move.Z * flySpeed)
 
@@ -337,21 +345,14 @@ return function(C, R, UI)
                 ffVel.Parent   = root2
             end
 
-            local move = Vector3.new()
-            local ok, controlModule = pcall(function()
-                return require(lp.PlayerScripts:WaitForChild("PlayerModule"):WaitForChild("ControlModule"))
-            end)
-            if ok and controlModule and controlModule.GetMoveVector then
-                move = controlModule:GetMoveVector()
-            end
-
+            local move    = getMoveVector()
             local cam2CF  = cam2.CFrame
             local look    = cam2CF.LookVector
             local right   = cam2CF.RightVector
             local lookY   = look.Y
 
-            local vel      = Vector3.new()
-            local isMoving = move.Magnitude > 1e-3
+            local vel      = Vector3.zero
+            local isMoving = move.Magnitude > 0.1
 
             if isMoving then
                 vel = vel + right * (move.X * flySpeed)
@@ -370,9 +371,9 @@ return function(C, R, UI)
                 if diff.Magnitude > 0.05 then
                     vel = diff * 20
                 else
-                    vel = Vector3.new()
-                    root2.AssemblyLinearVelocity  = Vector3.new()
-                    root2.AssemblyAngularVelocity = Vector3.new()
+                    vel = Vector3.zero
+                    root2.AssemblyLinearVelocity  = Vector3.zero
+                    root2.AssemblyAngularVelocity = Vector3.zero
                 end
             end
 
@@ -433,8 +434,8 @@ return function(C, R, UI)
             local bv = root:FindFirstChild("__ForceFlyBV")
             if bg then bg:Destroy() end
             if bv then bv:Destroy() end
-            root.AssemblyLinearVelocity  = Vector3.new()
-            root.AssemblyAngularVelocity = Vector3.new()
+            root.AssemblyLinearVelocity  = Vector3.zero
+            root.AssemblyAngularVelocity = Vector3.zero
         end
 
         if ffGyro then pcall(function() ffGyro:Destroy() end); ffGyro = nil end
@@ -641,9 +642,9 @@ return function(C, R, UI)
     end
 
     local function disableInstantInteract()
-        if shownConn   then shownConn:Disconnect();   shownConn   = nil end
-        if trigConn    then trigConn:Disconnect();     trigConn    = nil end
-        if hiddenConn  then hiddenConn:Disconnect();   hiddenConn  = nil end
+        if shownConn  then shownConn:Disconnect();  shownConn  = nil end
+        if trigConn   then trigConn:Disconnect();   trigConn   = nil end
+        if hiddenConn then hiddenConn:Disconnect(); hiddenConn = nil end
         for p, _ in pairs(promptDurations) do
             restorePrompt(p)
         end
@@ -769,25 +770,21 @@ return function(C, R, UI)
     })
 
     lp.CharacterAdded:Connect(function()
+        cachedControlModule = nil
         task.defer(function()
             applyMovementConfig()
-
             if infJumpOn then enableInfiniteJump() end
-
             if forceFlyOn then
                 startForceFly()
             elseif flyEnabled then
                 startFly()
             end
-
             if noclipOn then applyNoclipToCharacter(lp.Character) end
-
             if godNegOn then
                 startGodNegative()
             elseif godPosOn then
                 startGodPositive()
             end
-
             if instantOn and not shownConn then
                 enableInstantInteract()
             elseif (not instantOn) and shownConn then
@@ -798,23 +795,18 @@ return function(C, R, UI)
 
     task.defer(function()
         applyMovementConfig()
-
         if infJumpOn then enableInfiniteJump() end
-
         if forceFlyOn then
             startForceFly()
         elseif flyEnabled then
             startFly()
         end
-
         if noclipOn then applyNoclipToCharacter(lp.Character) end
-
         if godNegOn then
             startGodNegative()
         elseif godPosOn then
             startGodPositive()
         end
-
         if instantOn and not shownConn then
             enableInstantInteract()
         elseif (not instantOn) and shownConn then
@@ -847,7 +839,6 @@ return function(C, R, UI)
             end
 
             if noclipOn and ch then applyNoclipToCharacter(ch) end
-
             if infJumpOn and not infJumpCon then enableInfiniteJump() end
 
             if flyEnabled and not FLYING then
